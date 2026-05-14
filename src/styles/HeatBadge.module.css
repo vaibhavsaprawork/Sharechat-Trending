@@ -1,49 +1,80 @@
 .heatBadge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  border-radius: 20px;
-  padding: 3px 10px;
-  font-size: 12px;
+  gap: 7px;
+  min-height: 28px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: none;
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+.lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.iconMask {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: -1px;
+  display: block;
+  background-color: currentColor;
+  mask-image: url(/icons/trend-flame.png);
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-image: url(/icons/trend-flame.png);
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+}
+
+.score {
+  flex-shrink: 0;
+  font-size: 14px;
   font-weight: 600;
-  border: 1px solid transparent;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.label {
+  min-width: 0;
+  max-width: 12rem;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.25;
+  opacity: 0.68;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .heatBadge[data-tier='hot'] {
   background: var(--heat-hot-bg);
-  border-color: var(--heat-hot-border);
   color: var(--heat-hot-text);
 }
 
 .heatBadge[data-tier='rising'] {
   background: var(--heat-rising-bg);
-  border-color: var(--heat-rising-border);
   color: var(--heat-rising-text);
 }
 
 .heatBadge[data-tier='viral'] {
   background: var(--heat-viral-bg);
-  border-color: var(--heat-viral-border);
   color: var(--heat-viral-text);
 }
 
 .heatBadge[data-tier='cool'] {
   background: var(--heat-cool-bg);
-  border-color: var(--heat-cool-border);
   color: var(--heat-cool-text);
 }
 
-.divider {
-  width: 1px;
-  height: 10px;
-  margin: 0 2px;
-  background: currentColor;
-  opacity: 0.4;
-  flex-shrink: 0;
-}
-
-.label {
-  font-size: 11px;
-  font-weight: 400;
-  opacity: 0.85;
+html[data-theme='dark'] .label {
+  opacity: 0.78;
 }

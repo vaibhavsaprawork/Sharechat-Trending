@@ -1,3 +1,4 @@
+import { useAppChrome } from '../context/AppChromeContext.jsx';
 import styles from '../styles/HeatBadge.module.css';
 
 function tierForScore(x) {
@@ -7,17 +8,37 @@ function tierForScore(x) {
   return 'cool';
 }
 
-export default function HeatBadge({ score, label }) {
+function heatLabelForTier(tier, t) {
+  switch (tier) {
+    case 'hot':
+      return t.veryHot;
+    case 'rising':
+      return t.rising;
+    case 'viral':
+      return t.viral;
+    case 'cool':
+    default:
+      return t.emerging;
+  }
+}
+
+export default function HeatBadge({ score }) {
+  const { t } = useAppChrome();
   const n = Number(score);
-  const s = Number.isFinite(n) ? n : 0;
+  const s = Number.isFinite(n) ? Math.round(n) : 0;
   const tier = tierForScore(s);
+  const labelText = heatLabelForTier(tier, t);
 
   return (
     <div className={styles.heatBadge} data-tier={tier}>
-      <span>🔥</span>
-      <span>{s}</span>
-      <span className={styles.divider} aria-hidden />
-      <span className={styles.label}>{label != null ? String(label) : ''}</span>
+      <span className={styles.lead}>
+        <span
+          className={styles.iconMask}
+          aria-hidden
+        />
+        <span className={styles.score}>{s}</span>
+      </span>
+      <span className={styles.label}>{labelText}</span>
     </div>
   );
 }

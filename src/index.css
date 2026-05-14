@@ -1,4 +1,31 @@
 html[data-theme='dark'] {
+  font-family: 'Noto Sans Devanagari', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  --font-display: 22px;
+  --font-display-weight: 700;
+  --font-display-lh: 1.2;
+  --font-headline: 18px;
+  --font-headline-weight: 700;
+  --font-headline-lh: 1.3;
+  --font-subhead: 15px;
+  --font-subhead-weight: 500;
+  --font-subhead-lh: 1.4;
+  --font-body: 14px;
+  --font-body-weight: 400;
+  --font-body-lh: 1.6;
+  --font-caption: 12px;
+  --font-caption-weight: 400;
+  --font-caption-lh: 1.4;
+  --font-label: 11px;
+  --font-label-weight: 600;
+  --font-label-lh: 1;
+  --font-button: 14px;
+  --font-button-weight: 500;
+  --font-button-lh: 1;
+  --ls-label: 0.06em;
+  --ls-headline: -0.01em;
+  --ls-display: -0.02em;
+
   --bg-primary: #111318;
   --bg-secondary: #1a1c22;
   --bg-card: #1a1c22;
@@ -25,29 +52,34 @@ html[data-theme='dark'] {
   --icon-btn-color: rgba(255, 255, 255, 0.72);
   --theme-toggle-bg: rgba(26, 28, 34, 0.85);
 
-  --feed-pill-bg: rgba(26, 28, 34, 0.65);
-  --feed-pill-color: rgba(255, 255, 255, 0.86);
-  --feed-pill-active-bg: rgba(255, 92, 53, 0.12);
+  --feed-pill-bg: #1e2028;
+  --feed-pill-color: #888888;
+  --feed-pill-active-bg: #ff5c35;
   --feed-pill-active-color: #ffffff;
-  --feed-pill-active-border: rgba(255, 92, 53, 0.55);
+  --feed-pill-active-border: transparent;
   --feed-pill-dot: var(--accent);
-  --feed-pill-border: var(--border);
+  --feed-pill-border: transparent;
+  --feed-pills-row-bg: #111318;
+  --feed-pills-row-border: transparent;
 
   --elev-card-shadow: none;
+  --elev-card-shadow-hover: none;
   --elev-card-border: 1px solid var(--border);
+  --rank-chip-bg: rgba(255, 255, 255, 0.08);
+  --rank-chip-fg: #c4c4c4;
 
-  --heat-hot-bg: #2d1810;
-  --heat-hot-border: #ff5c35;
-  --heat-hot-text: #ff5c35;
-  --heat-rising-bg: #2d2010;
-  --heat-rising-border: #ffb74d;
-  --heat-rising-text: #ffb74d;
-  --heat-viral-bg: #1a2010;
-  --heat-viral-border: #8bc34a;
-  --heat-viral-text: #8bc34a;
-  --heat-cool-bg: #1a1c22;
-  --heat-cool-border: #555555;
-  --heat-cool-text: #666666;
+  --heat-hot-bg: rgba(255, 92, 53, 0.12);
+  --heat-hot-border: transparent;
+  --heat-hot-text: #ffb4a8;
+  --heat-rising-bg: rgba(255, 183, 77, 0.1);
+  --heat-rising-border: transparent;
+  --heat-rising-text: #ffcc80;
+  --heat-viral-bg: rgba(139, 195, 74, 0.1);
+  --heat-viral-border: transparent;
+  --heat-viral-text: #c5e1a5;
+  --heat-cool-bg: rgba(255, 255, 255, 0.06);
+  --heat-cool-border: transparent;
+  --heat-cool-text: #9e9e9e;
   --heat-divider: var(--heat-hot-border);
 
   --skeleton-base: #16181f;
@@ -57,13 +89,21 @@ html[data-theme='dark'] {
   --ai-section-border-left: #ff5c35;
   --sources-section-bg: var(--bg-card);
   --source-row-text: rgba(255, 255, 255, 0.86);
+  --sources-heading-color: rgba(255, 255, 255, 0.55);
+  --ai-analysis-title-color: #ff8a65;
+  --detail-root-bg: #111318;
+  --detail-topbar-border: #2a2a35;
+  --bookmark-muted: #888888;
+  --detail-back-icon: rgba(255, 255, 255, 0.88);
+  --detail-crumb: rgba(255, 255, 255, 0.55);
 
-  --tabs-bar-bg: rgba(26, 28, 34, 0.65);
-  --tab-color: rgba(255, 255, 255, 0.65);
-  --tab-active-bg: rgba(255, 92, 53, 0.14);
+  --tabs-bar-bg: transparent;
+  --tab-color: #999999;
+  --tab-active-bg: transparent;
   --tab-active-color: #ffffff;
-  --tab-active-border: rgba(255, 92, 53, 0.35);
-  --tab-active-underline: transparent;
+  --tab-active-border: transparent;
+  --tab-active-underline: #ff5c35;
+  --detail-tabs-border: #2a2a35;
 
   --back-btn-bg: rgba(26, 28, 34, 0.85);
   --hero-base-bg: #14161c;
@@ -85,6 +125,7 @@ html[data-theme='dark'] {
   --related-title: rgba(255, 255, 255, 0.86);
   --related-pill-border: #2a2a35;
   --related-pill-color: var(--text-secondary);
+  --related-pill-bg: #1e2028;
   --play-circle-bg: rgba(255, 255, 255, 0.95);
   --play-circle-fg: #111318;
   --avatar-text: #ffffff;
@@ -95,11 +136,13 @@ html[data-theme='dark'] {
   --error-text: rgba(255, 255, 255, 0.92);
   --error-detail: rgba(255, 255, 255, 0.65);
   --tag-title: #ffffff;
-  --tag-rank: #444444;
+  --tag-rank: #888888;
   --tag-desc: var(--text-secondary);
   --accent-soft: rgba(255, 92, 53, 0.35);
+  --lang-pill-wrap-bg: #1e2028;
   --lang-pill-active-fg: #ffffff;
-  --lang-pill-active-bg: var(--accent);
+  --lang-pill-active-bg: #2a2e38;
+  --lang-pill-active-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
   --lang-pill-inactive-fg: #888888;
   --lang-pill-inactive-bg: transparent;
   --saved-empty-icon: var(--text-tertiary);
@@ -123,6 +166,10 @@ html[data-theme='dark'] {
   --cat-rajniti-bg: #1e1a2e;
   --cat-taknik-fg: #4fc3f7;
   --cat-taknik-bg: #1a2530;
+  --cat-shiksha-fg: #26c6da;
+  --cat-shiksha-bg: #1a2a2e;
+  --cat-swasthya-fg: #66bb6a;
+  --cat-swasthya-bg: #1a2e1e;
 
   --video-grad-end: #111318;
   --reel-grad-end: #0d0f14;
@@ -133,6 +180,33 @@ html[data-theme='dark'] {
 }
 
 html[data-theme='light'] {
+  font-family: 'Roboto', 'Noto Sans Devanagari', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  --font-display: 22px;
+  --font-display-weight: 700;
+  --font-display-lh: 1.2;
+  --font-headline: 18px;
+  --font-headline-weight: 700;
+  --font-headline-lh: 1.3;
+  --font-subhead: 15px;
+  --font-subhead-weight: 500;
+  --font-subhead-lh: 1.4;
+  --font-body: 14px;
+  --font-body-weight: 400;
+  --font-body-lh: 1.6;
+  --font-caption: 12px;
+  --font-caption-weight: 400;
+  --font-caption-lh: 1.4;
+  --font-label: 11px;
+  --font-label-weight: 600;
+  --font-label-lh: 1;
+  --font-button: 14px;
+  --font-button-weight: 500;
+  --font-button-lh: 1;
+  --ls-label: 0.06em;
+  --ls-headline: -0.01em;
+  --ls-display: -0.02em;
+
   --bg-primary: #f5f5f7;
   --bg-secondary: #ffffff;
   --bg-card: #ffffff;
@@ -150,8 +224,8 @@ html[data-theme='light'] {
   --maxw: 390px;
 
   --header-bg: #ffffff;
-  --header-border: #e5e5ea;
-  --header-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --header-border: #e8e8e8;
+  --header-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
   --phone-outer-line: rgba(0, 0, 0, 0.06);
   --status-bar: #1a1a1a;
   --status-icons: #333333;
@@ -159,49 +233,62 @@ html[data-theme='light'] {
   --icon-btn-color: #444444;
   --theme-toggle-bg: #ffffff;
 
-  --feed-pill-bg: #efefef;
-  --feed-pill-color: #666666;
-  --feed-pill-active-bg: #ff5c35;
+  --feed-pill-bg: #f0f0f0;
+  --feed-pill-color: #444444;
+  --feed-pill-active-bg: #1a1a1a;
   --feed-pill-active-color: #ffffff;
-  --feed-pill-active-border: var(--accent);
-  --feed-pill-dot: #ffffff;
-  --feed-pill-border: var(--border);
+  --feed-pill-active-border: transparent;
+  --feed-pill-dot: transparent;
+  --feed-pill-border: transparent;
+  --feed-pills-row-bg: #ffffff;
+  --feed-pills-row-border: #e8e8e8;
 
-  --elev-card-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  --elev-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --elev-card-shadow-hover: 0 5px 16px rgba(0, 0, 0, 0.08);
   --elev-card-border: none;
+  --rank-chip-bg: #f0f0f0;
+  --rank-chip-fg: #757575;
 
-  --heat-hot-bg: #fff0eb;
-  --heat-hot-border: #ff5c35;
-  --heat-hot-text: #cc3a1a;
-  --heat-rising-bg: #fff8ec;
-  --heat-rising-border: #ffb74d;
-  --heat-rising-text: #996600;
-  --heat-viral-bg: #f0f8ec;
-  --heat-viral-border: #66bb6a;
-  --heat-viral-text: #2e7d32;
-  --heat-cool-bg: #f5f5f7;
-  --heat-cool-border: #e0e0e0;
-  --heat-cool-text: #666666;
+  --heat-hot-bg: #fdecec;
+  --heat-hot-border: transparent;
+  --heat-hot-text: #d93025;
+  --heat-rising-bg: #fff4e5;
+  --heat-rising-border: transparent;
+  --heat-rising-text: #c65100;
+  --heat-viral-bg: #e8f5e9;
+  --heat-viral-border: transparent;
+  --heat-viral-text: #1b5e20;
+  --heat-cool-bg: #f3f3f3;
+  --heat-cool-border: transparent;
+  --heat-cool-text: #616161;
   --heat-divider: var(--heat-hot-border);
 
   --skeleton-base: #ececef;
   --skeleton-shine-mid: #d9d9de;
 
-  --ai-section-bg: #fff8f5;
+  --ai-section-bg: #fffaf7;
   --ai-section-border-left: #ff5c35;
-  --sources-section-bg: #fafafa;
-  --source-row-text: #333333;
+  --sources-section-bg: #f9f9f9;
+  --source-row-text: #555555;
+  --sources-heading-color: #999999;
+  --ai-analysis-title-color: #ff5c35;
+  --detail-root-bg: #ffffff;
+  --detail-topbar-border: #f0f0f0;
+  --bookmark-muted: #bbbbbb;
+  --detail-back-icon: #444444;
+  --detail-crumb: #666666;
 
-  --tabs-bar-bg: #ffffff;
-  --tab-color: var(--text-secondary);
+  --tabs-bar-bg: transparent;
+  --tab-color: #999999;
   --tab-active-bg: transparent;
-  --tab-active-color: var(--text-primary);
+  --tab-active-color: #1a1a1a;
   --tab-active-border: transparent;
-  --tab-active-underline: var(--accent);
+  --tab-active-underline: #1a1a1a;
+  --detail-tabs-border: #f0f0f0;
 
   --back-btn-bg: #ffffff;
   --hero-base-bg: #e8e8ed;
-  --stat-card-bg: #ffffff;
+  --stat-card-bg: #fafafa;
   --heat-bar-title: var(--text-primary);
   --bar-track: rgba(0, 0, 0, 0.08);
   --section-body: #333333;
@@ -217,8 +304,9 @@ html[data-theme='light'] {
   --reel-caption: rgba(26, 26, 26, 0.92);
   --reel-hearts: var(--accent);
   --related-title: var(--text-primary);
-  --related-pill-border: var(--border);
-  --related-pill-color: var(--text-secondary);
+  --related-pill-border: transparent;
+  --related-pill-color: #444444;
+  --related-pill-bg: #f0f0f0;
   --play-circle-bg: #ffffff;
   --play-circle-fg: #111318;
   --avatar-text: #ffffff;
@@ -229,21 +317,23 @@ html[data-theme='light'] {
   --error-text: var(--text-primary);
   --error-detail: var(--text-secondary);
   --tag-title: var(--text-primary);
-  --tag-rank: var(--text-tertiary);
-  --tag-desc: var(--text-secondary);
+  --tag-rank: #999999;
+  --tag-desc: #737373;
   --accent-soft: rgba(255, 92, 53, 0.35);
-  --lang-pill-active-fg: #ffffff;
-  --lang-pill-active-bg: var(--accent);
-  --lang-pill-inactive-fg: #888888;
+  --lang-pill-wrap-bg: #f0f0f0;
+  --lang-pill-active-fg: #1a1a1a;
+  --lang-pill-active-bg: #ffffff;
+  --lang-pill-active-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  --lang-pill-inactive-fg: #666666;
   --lang-pill-inactive-bg: transparent;
   --saved-empty-icon: var(--text-tertiary);
 
   --cat-pill-ring: rgba(0, 0, 0, 0.08);
   --cat-icon-ring: rgba(0, 0, 0, 0.08);
 
-  --cat-khel-fg: #2e7d32;
+  --cat-khel-fg: #2e7d1f;
   --cat-khel-bg: #e8f5e9;
-  --cat-samachar-fg: #6a1b9a;
+  --cat-samachar-fg: #6b3fa0;
   --cat-samachar-bg: #f3e5f5;
   --cat-manoranjan-fg: #d84315;
   --cat-manoranjan-bg: #fbe9e7;
@@ -253,10 +343,14 @@ html[data-theme='light'] {
   --cat-vitt-bg: #fff3e0;
   --cat-tyohar-fg: #c2185b;
   --cat-tyohar-bg: #fce4ec;
-  --cat-rajniti-fg: #6a1b9a;
+  --cat-rajniti-fg: #6b3fa0;
   --cat-rajniti-bg: #f3e5f5;
   --cat-taknik-fg: #0277bd;
   --cat-taknik-bg: #e1f5fe;
+  --cat-shiksha-fg: #00838f;
+  --cat-shiksha-bg: #e0f7fa;
+  --cat-swasthya-fg: #2e7d32;
+  --cat-swasthya-bg: #e8f5e9;
 
   --video-grad-end: #f5f5f7;
   --reel-grad-end: #ececef;
@@ -264,6 +358,58 @@ html[data-theme='light'] {
   --source-dot-0: var(--accent);
   --source-dot-1: #0288d1;
   --source-dot-2: #7b1fa2;
+}
+
+.catMetaAccent {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.92;
+}
+
+.catMetaAccent[data-cat='खेल'] {
+  color: var(--cat-khel-fg);
+}
+
+.catMetaAccent[data-cat='समाचार'] {
+  color: var(--cat-samachar-fg);
+}
+
+.catMetaAccent[data-cat='मनोरंजन'] {
+  color: var(--cat-manoranjan-fg);
+}
+
+.catMetaAccent[data-cat='मौसम'] {
+  color: var(--cat-mausam-fg);
+}
+
+.catMetaAccent[data-cat='वित्त'] {
+  color: var(--cat-vitt-fg);
+}
+
+.catMetaAccent[data-cat='त्योहार'] {
+  color: var(--cat-tyohar-fg);
+}
+
+.catMetaAccent[data-cat='राजनीति'] {
+  color: var(--cat-rajniti-fg);
+}
+
+.catMetaAccent[data-cat='तकनीक'] {
+  color: var(--cat-taknik-fg);
+}
+
+.catMetaAccent[data-cat='शिक्षा'] {
+  color: var(--cat-shiksha-fg);
+}
+
+.catMetaAccent[data-cat='स्वास्थ्य'] {
+  color: var(--cat-swasthya-fg);
 }
 
 .catIconTint {
@@ -321,13 +467,111 @@ html[data-theme='light'] {
   background: var(--cat-taknik-bg);
 }
 
+.catIconTint[data-cat='शिक्षा'],
+.catPill[data-cat='शिक्षा'] {
+  color: var(--cat-shiksha-fg);
+  background: var(--cat-shiksha-bg);
+}
+
+.catIconTint[data-cat='स्वास्थ्य'],
+.catPill[data-cat='स्वास्थ्य'] {
+  color: var(--cat-swasthya-fg);
+  background: var(--cat-swasthya-bg);
+}
+
 .catPill {
   border-color: var(--cat-pill-ring);
 }
 
-* {
+/* Feed category tabs — Google News style (see FeedView) */
+.categories-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.categories-row::-webkit-scrollbar {
+  display: none;
+}
+
+.category-pill {
+  flex: 0 0 auto;
   transition:
-    background-color 0.2s ease,
-    color 0.2s ease,
-    border-color 0.2s ease;
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+[data-theme='light'] .categories-row {
+  background: #ffffff;
+  border-bottom: 1px solid #e8e8e8;
+  padding: 6px 12px;
+  gap: 4px;
+}
+
+[data-theme='light'] .category-pill {
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-family: 'Roboto', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: #5f6368;
+  white-space: nowrap;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+[data-theme='light'] .category-pill.active {
+  background: #e8f4fc;
+  color: #1557b0;
+  font-weight: 600;
+}
+
+@media (hover: hover) {
+  [data-theme='light'] .category-pill:hover:not(.active) {
+    background: #f0f0f0;
+  }
+}
+
+[data-theme='dark'] .categories-row {
+  background: #111318;
+  border-bottom: 1px solid #1e2028;
+  padding: 6px 12px;
+  gap: 4px;
+}
+
+[data-theme='dark'] .category-pill {
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  background: #1e2028;
+  color: #888888;
+  white-space: nowrap;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+[data-theme='dark'] .category-pill.active {
+  background: #ff5c35;
+  color: #ffffff;
+}
+
+button {
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.12s ease;
 }

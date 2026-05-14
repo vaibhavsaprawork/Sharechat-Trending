@@ -267,7 +267,7 @@ const RSS_TREND_SIGNAL_FEEDS = [
 
 const RSS_FETCH_TIMEOUT_MS = 12_000;
 
-/** Feed categories — default is one topic per category (8 total). */
+/** Feed categories — default is one topic per category (10 total; assignment minimum 10). */
 const TREND_CATEGORIES = [
   'खेल',
   'समाचार',
@@ -277,6 +277,8 @@ const TREND_CATEGORIES = [
   'त्योहार',
   'राजनीति',
   'तकनीक',
+  'शिक्षा',
+  'स्वास्थ्य',
 ];
 
 function topicTargetCount() {
@@ -354,7 +356,7 @@ Rules:
 - "imageUrl": copy a relevant imageUrl from the news list when available; else "".
 - "relatedTags": 3-4 related Hindi hashtags.
 - Filter out topics irrelevant to Indian Hindi-speaking audience.
-- Prioritize: cricket, Bollywood, Indian politics, Indian festivals, Indian weather, Indian finance news.
+- Prioritize: cricket, Bollywood, Indian politics, Indian festivals, Indian weather, Indian finance news, board exams / education news, public health and wellness stories relevant to India.
 - Ranks must be 1..${k} unique, sorted by importance.`;
 }
 

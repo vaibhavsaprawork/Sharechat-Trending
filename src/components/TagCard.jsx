@@ -4,10 +4,12 @@ import {
   TOPIC_IMAGES,
   resolveTopicImageUrl,
 } from '../lib/categories';
+import { useAppChrome } from '../context/AppChromeContext.jsx';
 import HeatBadge from './HeatBadge';
 import styles from '../styles/TagCard.module.css';
 
 export default function TagCard({ topic, onOpen }) {
+  const { t } = useAppChrome();
   const cat = topic.category;
   const imgSrc = resolveTopicImageUrl(topic);
 
@@ -25,29 +27,29 @@ export default function TagCard({ topic, onOpen }) {
             e.currentTarget.src = TOPIC_IMAGES['समाचार'];
           }}
         />
-        <div className={styles.heroGradTop} aria-hidden />
-        <div className={styles.heroGradBottom} aria-hidden />
       </div>
 
       <div className={styles.body}>
-        <span className={`${styles.catIcon} catIconTint`} data-cat={cat}>
-          <CategoryIcon category={cat} size={18} />
-        </span>
+        <div className={`${styles.catLabelRow} catMetaAccent`} data-cat={cat}>
+          <span className={styles.catIconInline}>
+            <CategoryIcon category={cat} size={12} />
+          </span>
+          <span>{topic.category}</span>
+        </div>
 
-        <div className={styles.mainCol}>
-          <div className={styles.rowTitle}>
-            <div className={`${styles.tagName} hinBody`}>{topic.hindiName}</div>
-            <span className={styles.rankInline}>#{topic.rank}</span>
-          </div>
+        <div className={styles.titleBlock}>
+          <div className={`${styles.tagName} hinBody`}>{topic.hindiName}</div>
+        </div>
 
-          <div className={styles.rowMeta}>
-            <span className={`${styles.pill} catPill hinBody`} data-cat={cat}>
-              {topic.category}
-            </span>
-            <HeatBadge score={topic.heatScore} label={topic.heatLabel} />
-          </div>
+        <div className={`${styles.desc} hinBody`}>{topic.description}</div>
 
-          <div className={`${styles.desc} hinBody`}>{topic.description}</div>
+        <div className={styles.footerRow}>
+          <span className={styles.rankChip} title={`#${topic.rank} · ${t.rankChipLabel}`}>
+            <span className={styles.rankNum}>#{topic.rank}</span>
+            <span className={styles.rankSep}>·</span>
+            <span className={styles.rankLbl}>{t.rankChipLabel}</span>
+          </span>
+          <HeatBadge score={topic.heatScore} />
         </div>
       </div>
     </button>

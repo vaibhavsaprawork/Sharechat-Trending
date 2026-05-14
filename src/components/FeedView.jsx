@@ -1,4 +1,13 @@
-import { Bell, RefreshCw, Search, Signal, Wifi, Battery } from 'lucide-react';
+import {
+  Bell,
+  Moon,
+  RefreshCw,
+  Search,
+  Signal,
+  Sun,
+  Wifi,
+  Battery,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAppChrome } from '../context/AppChromeContext.jsx';
 import { CATEGORY_ORDER } from '../lib/categories';
@@ -35,9 +44,9 @@ export default function FeedView({ topics, loading, error, onOpenTopic, onRefres
       <div className={styles.statusBar}>
         <span>{formatClock(now)}</span>
         <div className={styles.statusIcons} aria-hidden>
-          <Signal size={16} strokeWidth={2.4} />
-          <Wifi size={16} strokeWidth={2.4} />
-          <Battery size={16} strokeWidth={2.4} />
+          <Signal size={14} strokeWidth={2.2} />
+          <Wifi size={14} strokeWidth={2.2} />
+          <Battery size={14} strokeWidth={2.2} />
         </div>
       </div>
 
@@ -51,7 +60,10 @@ export default function FeedView({ topics, loading, error, onOpenTopic, onRefres
             disabled={loading || refreshing}
             aria-label={t.refresh}
           >
-            <RefreshCw size={18} strokeWidth={2.2} className={refreshing ? styles.spin : ''} />
+            <RefreshCw size={18} strokeWidth={2} className={refreshing ? styles.spin : ''} />
+          </button>
+          <button type="button" className={styles.iconBtn} aria-label={t.search}>
+            <Search size={18} strokeWidth={2} />
           </button>
           <button
             type="button"
@@ -59,7 +71,11 @@ export default function FeedView({ topics, loading, error, onOpenTopic, onRefres
             onClick={toggleTheme}
             aria-label={theme === 'dark' ? 'Light mode' : 'Dark mode'}
           >
-            {theme === 'dark' ? '🌙' : '☀️'}
+            {theme === 'dark' ? (
+              <Moon size={18} strokeWidth={2} className={styles.themeIconMoon} />
+            ) : (
+              <Sun size={18} strokeWidth={2} className={styles.themeIconSun} />
+            )}
           </button>
           <div className={styles.langGroup} role="group" aria-label="Language">
             <button
@@ -77,40 +93,33 @@ export default function FeedView({ topics, loading, error, onOpenTopic, onRefres
               EN
             </button>
           </div>
-          <button type="button" className={styles.iconBtn} aria-label={t.search}>
-            <Search size={18} strokeWidth={2.2} />
-          </button>
           <button type="button" className={styles.iconBtn} aria-label={t.notifications}>
-            <Bell size={18} strokeWidth={2.2} />
+            <Bell size={18} strokeWidth={2} />
           </button>
         </div>
       </div>
 
-      <div className={styles.pillsRow}>
-        <div className={styles.pills} role="tablist" aria-label={t.category}>
-          {CATEGORY_ORDER.map((c) => {
-            const active = c === filter;
-            return (
-              <button
-                key={c}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                className={`${styles.pill} ${active ? styles.pillActive : ''}`}
-                onClick={() => setFilter(c)}
-              >
-                <span className={styles.pillInner}>
-                  <span>{pillLabel(locale, c)}</span>
-                  {active ? <span className={styles.pillDot} aria-hidden /> : null}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+      <div className="categories-row" role="tablist" aria-label={t.category}>
+        {CATEGORY_ORDER.map((c) => {
+          const active = c === filter;
+          return (
+            <button
+              key={c}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              className={`category-pill${active ? ' active' : ''}`}
+              onClick={() => setFilter(c)}
+            >
+              {pillLabel(locale, c)}
+            </button>
+          );
+        })}
       </div>
 
       <div className={`${styles.sectionLabel} hinBody`}>
-        {t.trendingNow} 🔥
+        <span className={styles.sectionFlame} aria-hidden />
+        <span>{t.trendingNow}</span>
       </div>
 
       {error ? (

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useAppChrome } from './context/AppChromeContext.jsx';
 import DetailView from './components/DetailView.jsx';
 import FeedView from './components/FeedView.jsx';
 import styles from './styles/App.module.css';
 
 export default function App() {
+  const { t } = useAppChrome();
   const [topics, setTopics] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -46,9 +48,8 @@ export default function App() {
       }
 
       if (!Array.isArray(data)) {
-        throw new Error(
-          `सर्वर से अमान्य प्रतिक्रिया (उम्मीद: JSON ऐरे)। ${text ? text.trim().slice(0, 160) : '(खाली)'}`
-        );
+        const snippet = text ? text.trim().slice(0, 160) : t.emptySnippet;
+        throw new Error(t.invalidJsonResponse.replace('{snippet}', snippet));
       }
 
       setTopics(data);
@@ -61,7 +62,7 @@ export default function App() {
         setLoading(false);
       }
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     loadTopics(false);

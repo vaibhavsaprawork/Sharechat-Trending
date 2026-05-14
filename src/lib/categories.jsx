@@ -2,6 +2,8 @@ import {
   CloudRain,
   Cpu,
   Film,
+  GraduationCap,
+  HeartPulse,
   Landmark,
   Newspaper,
   Star,
@@ -19,6 +21,8 @@ export const CATEGORY_ORDER = [
   'वित्त',
   'राजनीति',
   'तकनीक',
+  'शिक्षा',
+  'स्वास्थ्य',
 ];
 
 /** Curated Unsplash CDN fallbacks (no API key). */
@@ -31,11 +35,13 @@ export const TOPIC_IMAGES = {
   त्योहार: 'https://images.unsplash.com/photo-1605101100278-5d1deb2b6498?w=600&q=80',
   समाचार: 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=600&q=80',
   तकनीक: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&q=80',
+  शिक्षा: 'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=600&q=80',
+  स्वास्थ्य: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=600&q=80',
 };
 
 export const TOPIC_HERO_IMG_STYLE = {
   width: '100%',
-  height: '160px',
+  height: '152px',
   objectFit: 'cover',
   display: 'block',
 };
@@ -76,6 +82,8 @@ export const CATEGORY_STYLES = {
   त्योहार: { fg: '#E91E8C', bg: '#2E1E2A', emoji: '✨' },
   राजनीति: { fg: '#9C6FE4', bg: '#1E1A2E', emoji: '🏛️' },
   तकनीक: { fg: '#4FC3F7', bg: '#1A2530', emoji: '💻' },
+  शिक्षा: { fg: '#26C6DA', bg: '#1A2A2E', emoji: '📚' },
+  स्वास्थ्य: { fg: '#66BB6A', bg: '#1A2E1E', emoji: '🏥' },
 };
 
 /** CSS var names for category accent (borders, emphasis). */
@@ -88,6 +96,8 @@ export const CATEGORY_ACCENT_VAR = {
   त्योहार: 'var(--cat-tyohar-fg)',
   राजनीति: 'var(--cat-rajniti-fg)',
   तकनीक: 'var(--cat-taknik-fg)',
+  शिक्षा: 'var(--cat-shiksha-fg)',
+  स्वास्थ्य: 'var(--cat-swasthya-fg)',
 };
 
 /** CSS var names for gradients (see `src/index.css` token definitions). */
@@ -100,6 +110,8 @@ export const CATEGORY_GRAD_VAR = {
   त्योहार: 'var(--cat-tyohar-bg)',
   राजनीति: 'var(--cat-rajniti-bg)',
   तकनीक: 'var(--cat-taknik-bg)',
+  शिक्षा: 'var(--cat-shiksha-bg)',
+  स्वास्थ्य: 'var(--cat-swasthya-bg)',
 };
 
 export function CategoryIcon({ category, size = 18 }) {
@@ -120,6 +132,10 @@ export function CategoryIcon({ category, size = 18 }) {
       return <Landmark size={size} strokeWidth={2.25} />;
     case 'तकनीक':
       return <Cpu size={size} strokeWidth={2.25} />;
+    case 'शिक्षा':
+      return <GraduationCap size={size} strokeWidth={2.25} />;
+    case 'स्वास्थ्य':
+      return <HeartPulse size={size} strokeWidth={2.25} />;
     default:
       return <Newspaper size={size} strokeWidth={2.25} />;
   }

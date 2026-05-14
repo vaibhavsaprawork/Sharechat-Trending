@@ -1,14 +1,20 @@
-import { Bookmark, ChevronLeft, Heart, Play } from 'lucide-react';
+import {
+  Bookmark,
+  ChevronLeft,
+  Heart,
+  MessageCircle,
+  Play,
+  Share2,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { makePostId, parsePostId, useAppChrome } from '../context/AppChromeContext.jsx';
+import { parsePostId, useAppChrome } from '../context/AppChromeContext.jsx';
 import {
   CategoryIcon,
-  CATEGORY_ACCENT_VAR,
   CATEGORY_GRAD_VAR,
-  TOPIC_HERO_IMG_STYLE,
   TOPIC_IMAGES,
   resolveTopicImageUrl,
 } from '../lib/categories';
+import { getDemoFeed } from '../lib/detailDemoContent.js';
 import HeatBadge from './HeatBadge';
 import styles from '../styles/DetailView.module.css';
 
@@ -53,6 +59,52 @@ function reelThumbStyle(topic) {
   };
 }
 
+function topicHash(topic) {
+  const s = `${String(topic?.hashtag ?? '')}|${Number(topic?.rank)}|${Number(topic?.heatScore)}`;
+  let h = 0;
+  for (let i = 0; i < s.length; i += 1) {
+    h = Math.imul(31, h) + s.charCodeAt(i);
+  }
+  return Math.abs(h);
+}
+
+function useTrendPulse(topic, t) {
+  return useMemo(() => {
+    const h = topicHash(topic);
+    const pct = 22 + (h % 118);
+    const k = 4 + (h % 19);
+    const bars = Array.from({ length: 8 }, (_, i) => 20 + ((h >> (i * 2)) % 55));
+    const fallbackN = 5 + (h % 6);
+    return {
+      velocity: t.velocityLine.replace('{pct}', String(pct)),
+      postsToday: t.postsTodayLine.replace('{k}', String(k)),
+      bars,
+      fallbackN,
+    };
+  }, [topic, t]);
+}
+
+function AiSummaryBlock({ text, t }) {
+  const body = text != null ? String(text) : '';
+  const [open, setOpen] = useState(false);
+  const long = body.length > 200;
+
+  return (
+    <>
+      <div
+        className={`${styles.sectionBody} ${styles.aiBody} ${long && !open ? styles.aiClamp : ''} hinBody`}
+      >
+        {body}
+      </div>
+      {long ? (
+        <button type="button" className={styles.aiReadMore} onClick={() => setOpen((o) => !o)}>
+          {open ? t.readLess : t.readMore}
+        </button>
+      ) : null}
+    </>
+  );
+}
+
 function BookmarkToggle({ id }) {
   const { isSaved, toggleSaved } = useAppChrome();
   const saved = isSaved(id);
@@ -75,12 +127,13 @@ function BookmarkToggle({ id }) {
       onClick={onClick}
       aria-label={saved ? 'Unsave' : 'Save'}
     >
-      <Bookmark size={20} strokeWidth={2.2} fill={saved ? 'currentColor' : 'none'} />
+      <Bookmark size={18} strokeWidth={2} fill={saved ? 'currentColor' : 'none'} />
     </button>
   );
 }
 
 function PostRowCard({ post }) {
+  const { t } = useAppChrome();
   return (
     <div className={styles.cardShell}>
       <BookmarkToggle id={post.id} />
@@ -97,12 +150,17 @@ function PostRowCard({ post }) {
         <p className={`${styles.postText} hinBody`}>{post.text}</p>
         <div className={styles.postActions}>
           <span className={styles.actionItem}>
-            ❤️ <span>{post.likes}</span>
+            <Heart size={16} strokeWidth={2} className={styles.actionIcon} aria-hidden />
+            <span>{post.likes}</span>
           </span>
           <span className={styles.actionItem}>
-            💬 <span>{post.comments}</span>
+            <MessageCircle size={16} strokeWidth={2} className={styles.actionIcon} aria-hidden />
+            <span>{post.comments}</span>
           </span>
-          <span className={styles.actionItem}>↗ शेयर</span>
+          <span className={styles.actionItem}>
+            <Share2 size={16} strokeWidth={2} className={styles.actionIcon} aria-hidden />
+            <span className="hinBody">{t.share}</span>
+          </span>
         </div>
       </article>
     </div>
@@ -142,62 +200,8 @@ function ReelRowCard({ topic, r }) {
   );
 }
 
-function useTopicFeed(topic) {
-  return useMemo(() => {
-    const name = topic.hindiName;
-    const tag = topic.hashtag;
-    const posts = [
-      {
-        id: makePostId(tag, 'posts', 0),
-        user: 'प्रिया शर्मा',
-        time: '१८ मिनट पहले',
-        text: `${name} पर आज सुबह से ही मीम्स और राय की बौछार है। लोग लिख रहे हैं कि यह ट्रेंड छोटे शहरों में भी तेज़ी से फैल रहा है। क्या आप भी इस पर अपनी बात जोड़ रहे हैं?`,
-        likes: '२.३ लाख',
-        comments: '४,२८९',
-      },
-      {
-        id: makePostId(tag, 'posts', 1),
-        user: 'अमित यादव · इंदौर',
-        time: '१ घंटा पहले',
-        text: `${tag} वाली पोस्ट्स में मज़ाक, वीडियो और ग्राउंड अपडेट सब मिल रहे हैं। किसी ने लिखा— “आज तो टाइमलाइन पूरी इसी खबर से भरी है।”`,
-        likes: '१.१ लाख',
-        comments: '१,९०२',
-      },
-      {
-        id: makePostId(tag, 'posts', 2),
-        user: 'नेहा 🇮🇳',
-        time: 'आज सुबह',
-        text: `“${name}” को लेकर परिवार वाले ग्रुप में भी चर्चा शुरू हो गई है। लोग स्रोत पूछ रहे हैं और शेयरचैट पर नई क्लिप्स लगातार आ रही हैं।`,
-        likes: '८४,३१०',
-        comments: '६७४',
-      },
-    ];
-    const video = [
-      {
-        id: makePostId(tag, 'video', 0),
-        title: `${name} — ग्राउंड रिपोर्ट जैसा शॉर्ट वीडियो`,
-        views: '३.२ लाख व्यूज',
-      },
-      {
-        id: makePostId(tag, 'video', 1),
-        title: `${tag} पर फनी क्लिप; कमेंट पटा पड़ा है`,
-        views: '७.६ लाख व्यूज',
-      },
-    ];
-    const reel = [
-      {
-        id: makePostId(tag, 'reel', 0),
-        caption: `रील #१: ${name} — १५ सेकंड में पूरा मूड`,
-        hearts: '१२.४ लाख',
-      },
-      {
-        id: makePostId(tag, 'reel', 1),
-        caption: `रील #२: ${tag} पर “हुक” वाला ट्रांज़िशन`,
-        hearts: '६.२ लाख',
-      },
-    ];
-    return { posts, video, reel };
-  }, [topic]);
+function useTopicFeed(topic, locale) {
+  return useMemo(() => getDemoFeed(topic, locale), [topic, locale]);
 }
 
 function PostsPanel({ posts }) {
@@ -280,19 +284,21 @@ function SavedPanel({ topic, feed, t }) {
 }
 
 export default function DetailView({ topic, onBack }) {
-  const { t } = useAppChrome();
+  const { t, locale } = useAppChrome();
   const [tab, setTab] = useState('posts');
   const heroSrc = resolveTopicImageUrl(topic);
-  const feed = useTopicFeed(topic);
-  const accent =
-    CATEGORY_ACCENT_VAR[topic.category] || CATEGORY_ACCENT_VAR['समाचार'];
+  const feed = useTopicFeed(topic, locale);
+  const pulse = useTrendPulse(topic, t);
+  const sourceList = topic.sources || [];
+  const crossN =
+    sourceList.length > 0 ? Math.min(12, Math.max(sourceList.length, 3)) : pulse.fallbackN;
 
   return (
     <div className={styles.root}>
       <div className={styles.topBar}>
-        <div className={styles.backZone} style={{ borderLeftColor: accent }}>
+        <div className={styles.backZone}>
           <button type="button" className={styles.back} onClick={onBack} aria-label={t.back}>
-            <ChevronLeft size={20} strokeWidth={2.4} />
+            <ChevronLeft size={20} strokeWidth={2.2} />
           </button>
         </div>
         <div className={styles.crumb}>
@@ -300,7 +306,6 @@ export default function DetailView({ topic, onBack }) {
             {t.back} <span className={styles.crumbSep}>›</span>{' '}
             <span className={styles.crumbTrailAccent}>{topic.category}</span>
           </div>
-          <div className={`${styles.crumbTitle} hinBody`}>{topic.hindiName}</div>
         </div>
       </div>
 
@@ -310,7 +315,6 @@ export default function DetailView({ topic, onBack }) {
           src={heroSrc}
           alt=""
           referrerPolicy="no-referrer"
-          style={TOPIC_HERO_IMG_STYLE}
           onError={(e) => {
             e.currentTarget.onerror = null;
             e.currentTarget.src = TOPIC_IMAGES['समाचार'];
@@ -323,52 +327,61 @@ export default function DetailView({ topic, onBack }) {
           <div className={`${styles.heroSub} hinBody`}>
             {topic.hashtag} · {t.trendingNow}
           </div>
+          <div className={styles.heroMetaRow} aria-label="Freshness">
+            <span className={styles.heroMetaItem}>{t.updatedMoments}</span>
+            <span className={styles.heroMetaDot} aria-hidden>
+              ·
+            </span>
+            <span className={styles.heroMetaItem}>{t.highConfidence}</span>
+          </div>
         </div>
       </div>
 
       <div className={styles.stats}>
-        <div className={`${styles.statCard} ${styles.elevCard}`}>
+        <div className={styles.statCard}>
           <div className={`${styles.statLabel} hinBody`}>{t.postsEst}</div>
           <div className={`${styles.statValue} hinBody`}>{estimatePosts(topic.heatScore)}</div>
         </div>
-        <div className={`${styles.statCard} ${styles.elevCard}`}>
+        <div className={styles.statCard}>
           <div className={`${styles.statLabel} hinBody`}>{t.heat}</div>
           <div className={styles.statHeat}>
-            <HeatBadge score={topic.heatScore} label={topic.heatLabel} />
+            <HeatBadge score={topic.heatScore} />
           </div>
         </div>
-        <div className={`${styles.statCard} ${styles.elevCard}`}>
+        <div className={styles.statCard}>
           <div className={`${styles.statLabel} hinBody`}>{t.category}</div>
           <div className={styles.statValueRow}>
             <span className={`${styles.statIconWrap} catIconTint`} data-cat={topic.category}>
-              <CategoryIcon category={topic.category} size={16} />
+              <CategoryIcon category={topic.category} size={14} />
             </span>
             <span className={`${styles.statValue} hinBody`}>{topic.category}</span>
           </div>
         </div>
       </div>
 
-      <div className={styles.heatBarWrap}>
-        <div className={styles.heatBarHead}>
-          <div className={styles.heatBarTitle}>{t.heatScore}</div>
-          <HeatBadge score={topic.heatScore} label={topic.heatLabel} />
-        </div>
-        <div className={styles.heatBarRow}>
-          <div className={styles.bar}>
-            <div className={styles.barFill} style={{ width: `${topic.heatScore}%` }} />
-          </div>
+      <div className={styles.pulseSection}>
+        <div className={styles.pulseTitle}>{t.trendPulse}</div>
+        <div className={styles.pulseMain}>{pulse.velocity}</div>
+        <div className={styles.pulseSub}>{pulse.postsToday}</div>
+        <div className={styles.sparkRow} aria-hidden>
+          {pulse.bars.map((pct, i) => (
+            <span key={i} className={styles.sparkBar} style={{ height: `${pct}%` }} />
+          ))}
         </div>
       </div>
 
       <div className={`${styles.section} ${styles.aiSection}`}>
-        <div className={styles.sectionTitle}>{t.aiAnalysis}</div>
-        <div className={`${styles.sectionBody} hinBody`}>{topic.aiSummary}</div>
+        <div className={styles.aiTitle}>{t.aiAnalysis}</div>
+        <AiSummaryBlock text={topic.aiSummary} t={t} />
       </div>
 
       <div className={`${styles.section} ${styles.sourcesSection}`}>
-        <div className={styles.sectionTitle}>{t.signalSources}</div>
+        <div className={styles.sourcesHeading}>{t.signalSources}</div>
+        <div className={styles.sourcesIntro}>
+          <span className={styles.sourcesCross}>{t.sourcesCrossCheck.replace('{n}', String(crossN))}</span>
+        </div>
         <div className={styles.sources}>
-          {(topic.sources || []).slice(0, 6).map((s, i) => (
+          {sourceList.slice(0, 6).map((s, i) => (
             <div key={`${i}-${s}`} className={styles.sourceRow}>
               <span className={styles.dot} />
               <div className={`${styles.sourceText} hinBody`}>{s}</div>
@@ -377,43 +390,45 @@ export default function DetailView({ topic, onBack }) {
         </div>
       </div>
 
-      <div className={styles.tabs} role="tablist" aria-label="Content">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'posts'}
-          className={`${styles.tab} ${tab === 'posts' ? styles.tabActive : ''}`}
-          onClick={() => setTab('posts')}
-        >
-          {t.posts}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'video'}
-          className={`${styles.tab} ${tab === 'video' ? styles.tabActive : ''}`}
-          onClick={() => setTab('video')}
-        >
-          {t.videos}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'reel'}
-          className={`${styles.tab} ${tab === 'reel' ? styles.tabActive : ''}`}
-          onClick={() => setTab('reel')}
-        >
-          {t.reels}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'saved'}
-          className={`${styles.tab} ${tab === 'saved' ? styles.tabActive : ''}`}
-          onClick={() => setTab('saved')}
-        >
-          🔖 {t.saved}
-        </button>
+      <div className={styles.tabsSticky}>
+        <div className={styles.tabs} role="tablist" aria-label="Content">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'posts'}
+            className={`${styles.tab} ${tab === 'posts' ? styles.tabActive : ''}`}
+            onClick={() => setTab('posts')}
+          >
+            {t.posts}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'video'}
+            className={`${styles.tab} ${tab === 'video' ? styles.tabActive : ''}`}
+            onClick={() => setTab('video')}
+          >
+            {t.videos}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'reel'}
+            className={`${styles.tab} ${tab === 'reel' ? styles.tabActive : ''}`}
+            onClick={() => setTab('reel')}
+          >
+            {t.reels}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'saved'}
+            className={`${styles.tab} ${tab === 'saved' ? styles.tabActive : ''}`}
+            onClick={() => setTab('saved')}
+          >
+            {t.saved}
+          </button>
+        </div>
       </div>
 
       {tab === 'posts' ? (

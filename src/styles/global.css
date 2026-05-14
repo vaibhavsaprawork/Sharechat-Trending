@@ -2,11 +2,6 @@
 *::before,
 *::after {
   box-sizing: border-box;
-  font-family:
-    'Noto Sans Devanagari',
-    -apple-system,
-    BlinkMacSystemFont,
-    sans-serif;
 }
 
 .hinBody {
@@ -20,11 +15,7 @@ body {
   min-height: 100%;
   background: var(--frame);
   color: var(--text);
-  font-family:
-    'Noto Sans Devanagari',
-    -apple-system,
-    BlinkMacSystemFont,
-    sans-serif;
+  font-family: inherit;
   -webkit-font-smoothing: antialiased;
 }
 
