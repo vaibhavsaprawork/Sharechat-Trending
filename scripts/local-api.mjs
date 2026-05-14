@@ -102,7 +102,9 @@ if (useOllama) {
   );
 }
 
-const handler = (await import('../api/trending.js')).default;
+const trendingHandler = (await import('../api/trending.js')).default;
+const llmHealthHandler = (await import('../api/llm-health.js')).default;
+const ollamaTestHandler = (await import('../api/ollama-test.js')).default;
 
 const server = http.createServer((req, res) => {
   if (!req.url?.startsWith('/api/')) {
@@ -112,7 +114,13 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  Promise.resolve(handler(req, res)).catch((err) => {
+  const run = req.url.startsWith('/api/ollama-test')
+    ? ollamaTestHandler(req, res)
+    : req.url.startsWith('/api/llm-health')
+      ? llmHealthHandler(req, res)
+      : trendingHandler(req, res);
+
+  Promise.resolve(run).catch((err) => {
     console.error('[local-api]', err);
     if (!res.headersSent) {
       res.statusCode = 500;
@@ -131,6 +139,10 @@ const isDirectRun =
 
 if (isDirectRun) {
   server.listen(port, host, () => {
-    console.log(`[local-api] http://${host}:${port}  → Vite proxies /api here (.env.local loaded)`);
+    console.log(
+    `[local-api] http://${host}:${port}  → Vite proxies /api here (.env.local loaded)\n` +
+      `  Health: GET http://${host}:${port}/api/llm-health  (?all=1 | ?ollama=1 | ?gemini=1)\n` +
+      `  Ollama ping: GET http://${host}:${port}/api/ollama-test`
+  );
   });
 }

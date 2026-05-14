@@ -1,6 +1,6 @@
 /**
  * Vercel Node.js serverless: GET /api/trending
- * Pipeline: RSS → optional NewsAPI → LLM (Anthropic → Gemini cloud, or Ollama) → JSON
+ * Pipeline: RSS (India headlines) → optional NewsAPI (top-headlines or GET_NEWS_API_URL e.g. /v2/everything) → LLM → JSON
  * Query: ?refresh=true — no FALLBACK_DATA on LLM failure (returns error instead).
  */
 
@@ -18,13 +18,61 @@ const RSS_HEADERS = {
   Accept: 'application/rss+xml, application/xml, text/xml, */*',
 };
 
-/** Abort slow LLM HTTP calls (Gemini, Anthropic, Ollama fetch) via AbortController. */
-const LLM_FETCH_TIMEOUT_MS = 8000;
+/** Abort slow LLM HTTP calls (Gemini, Anthropic, Ollama) via AbortController. Override with LLM_FETCH_TIMEOUT_MS (ms). */
+function getLlmFetchTimeoutMs() {
+  const n = parseInt(process.env.LLM_FETCH_TIMEOUT_MS, 10);
+  if (Number.isFinite(n) && n >= 3000 && n <= 300_000) {
+    return n;
+  }
+  return 8000;
+}
 
 function createLlmAbortSignal() {
   const controller = new AbortController();
-  setTimeout(() => controller.abort(), LLM_FETCH_TIMEOUT_MS);
+  setTimeout(() => controller.abort(), getLlmFetchTimeoutMs());
   return controller.signal;
+}
+
+/** Local Ollama inference is slow — default timeout below; cap via OLLAMA_FETCH_TIMEOUT_MS (up to 30 min). */
+const DEFAULT_OLLAMA_FETCH_TIMEOUT_MS = 300_000;
+const MAX_OLLAMA_FETCH_TIMEOUT_MS = 1_800_000;
+
+function getOllamaFetchTimeoutMs() {
+  const o = parseInt(process.env.OLLAMA_FETCH_TIMEOUT_MS, 10);
+  if (Number.isFinite(o) && o >= 10_000 && o <= MAX_OLLAMA_FETCH_TIMEOUT_MS) {
+    return o;
+  }
+  const shared = parseInt(process.env.LLM_FETCH_TIMEOUT_MS, 10);
+  if (Number.isFinite(shared) && shared >= 10_000 && shared <= MAX_OLLAMA_FETCH_TIMEOUT_MS) {
+    return shared;
+  }
+  return DEFAULT_OLLAMA_FETCH_TIMEOUT_MS;
+}
+
+function createOllamaAbortSignal() {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), getOllamaFetchTimeoutMs());
+  return controller.signal;
+}
+
+function isAbortLikeError(err) {
+  if (!err) return false;
+  if (err.name === 'AbortError') return true;
+  const m = String(err.message || err);
+  return /aborted|AbortError/i.test(m);
+}
+
+/** Node/undici `fetch failed` — surface `error.cause` (e.g. ECONNREFUSED, ENOTFOUND). */
+function formatNodeFetchError(err) {
+  if (!err) return '';
+  let s = err.message || String(err);
+  const c = err.cause;
+  if (c) {
+    const cm = c.message || String(c);
+    s += ` | cause: ${cm}`;
+    if (c.code) s += ` (${c.code})`;
+  }
+  return s;
 }
 
 /** Shown when LLM is unavailable or fails (timeout, rate limit, bad response). */
@@ -202,18 +250,22 @@ const FALLBACK_DATA = [
   },
 ];
 
-/** Legacy Google Trends daily RSS — often 404 now; kept as first try. */
-const GOOGLE_TRENDS_RSS_CANDIDATES = [
-  'https://trends.google.com/trends/trendingsearches/daily/rss?geo=IN',
-  'https://trends.google.com/trends/trendingsearches/daily/rss?geo=IN&hl=en-IN',
+/** India / world RSS used as trend signals for the LLM (Google Trends daily RSS is discontinued — 404). */
+const RSS_TREND_SIGNAL_FEEDS = [
+  { url: 'https://news.google.com/rss?hl=hi&gl=IN&ceid=IN:hi', name: 'Google News (HI)' },
+  { url: 'https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en', name: 'Google News (en-IN)' },
+  {
+    url: 'https://news.google.com/rss/headlines/section/topic/NATION?ned=in&hl=en-IN&gl=IN',
+    name: 'Google News (Nation)',
+  },
+  { url: 'https://feeds.bbci.co.uk/news/world/asia/india/rss.xml', name: 'BBC News India' },
+  { url: 'https://feeds.bbci.co.uk/sport/cricket/rss.xml', name: 'BBC Sport Cricket' },
+  { url: 'https://indianexpress.com/section/india/feed/', name: 'Indian Express India' },
+  { url: 'https://www.thehindu.com/news/national/?service=rss', name: 'The Hindu National' },
+  { url: 'https://feeds.feedburner.com/ndtvnews-top-stories', name: 'NDTV Top Stories' },
 ];
 
-/** Public Google News India feeds (RSS) as trend-signal fallback when Trends RSS is gone. */
-const GOOGLE_NEWS_RSS_FALLBACKS = [
-  'https://news.google.com/rss?hl=hi&gl=IN&ceid=IN:hi',
-  'https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en',
-  'https://news.google.com/rss/headlines/section/topic/NATION?ned=in&hl=en-IN&gl=IN',
-];
+const RSS_FETCH_TIMEOUT_MS = 12_000;
 
 /** Feed categories — default is one topic per category (8 total). */
 const TREND_CATEGORIES = [
@@ -241,14 +293,25 @@ function buildTrendingUserPayload(signals, articles, opts = {}) {
   const k = topicTargetCount();
   const terms = signals.terms || [];
   const label = signals.sourceLabel || 'ट्रेंड RSS';
+  let slice = articles.slice(0, maxArticles);
+  if (opts.slimArticles) {
+    slice = slice.map((a) => ({
+      title: a.title || '',
+      source: a.source || '',
+      imageUrl: a.imageUrl || '',
+    }));
+  }
+  const newsLabel = opts.slimArticles
+    ? `2) समाचार सूची — भारत की शीर्ष ${maxArticles} (title, source, imageUrl जब उपलब्ध हो):`
+    : `2) NewsAPI — भारत की शीर्ष ${maxArticles} हेडलाइन (title, description, source, imageUrl):`;
   return [
     'नीचे दो सूचियाँ हैं।',
     '',
     `1) ${label}:`,
     JSON.stringify(terms.slice(0, maxTerms), null, 0),
     '',
-    `2) NewsAPI — भारत की शीर्ष ${maxArticles} हेडलाइन (title, description, source, imageUrl):`,
-    JSON.stringify(articles.slice(0, maxArticles), null, 0),
+    newsLabel,
+    JSON.stringify(slice, null, 0),
     '',
     `उपरोक्त को मर्ज करके ठीक ${k} ट्रेंडिंग विषय JSON ऐरे में लौटाओ — प्रत्येक आइटम की "category" अलग हो (${TREND_CATEGORIES.slice(0, k).join(', ')})।`,
   ].join('\n');
@@ -299,22 +362,22 @@ function buildOllamaSpeedSuffix() {
   const k = topicTargetCount();
   return `
 
-Speed note (local inference): keep description and aiSummary in Hindi but concise (shorter sentences). Still return exactly ${k} items with all required keys, one distinct category per item.`;
+Speed note (local inference): JSON only, no markdown. Keep each "description" to 1 short Hindi sentence and "aiSummary" to 2 short Hindi sentences (not 3–4). Still return exactly ${k} items with all required keys, one distinct category per item.`;
 }
 
 function setCors(res) {
   Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
 }
 
-function parseRssTitles(xml) {
+function parseRssItemTitles(xml) {
   if (!xml || typeof xml !== 'string') return [];
   const titles = [];
   const itemRegex = /<item\b[^>]*>([\s\S]*?)<\/item>/gi;
   let m;
   while ((m = itemRegex.exec(xml)) !== null) {
     const block = m[1];
-    const cdata = block.match(/<title>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/title>/i);
-    const plain = block.match(/<title>\s*([^<]+)\s*<\/title>/i);
+    const cdata = block.match(/<title[^>]*>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/title>/i);
+    const plain = block.match(/<title[^>]*>\s*([^<]+)\s*<\/title>/i);
     const raw = (cdata && cdata[1]) || (plain && plain[1]) || '';
     const title = raw.replace(/<!\[CDATA\[|\]\]>/g, '').trim();
     if (
@@ -328,65 +391,232 @@ function parseRssTitles(xml) {
   return [...new Set(titles)];
 }
 
-async function fetchRssTitles(url) {
-  const res = await fetch(url, { headers: RSS_HEADERS });
-  if (!res.ok) {
-    throw new Error(`RSS ${res.status}`);
+/** Atom 1.0 (many publishers use <entry> instead of <item>). */
+function parseAtomEntryTitles(xml) {
+  if (!xml || typeof xml !== 'string') return [];
+  const titles = [];
+  const entryRegex = /<entry\b[^>]*>([\s\S]*?)<\/entry>/gi;
+  let m;
+  while ((m = entryRegex.exec(xml)) !== null) {
+    const block = m[1];
+    let raw = '';
+    const cdata = block.match(/<title[^>]*>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/title>/i);
+    if (cdata) {
+      raw = cdata[1];
+    } else {
+      const plain = block.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      if (plain) raw = plain[1].replace(/<[^>]+>/g, ' ');
+    }
+    const title = raw.replace(/<!\[CDATA\[|\]\]>/g, '').replace(/\s+/g, ' ').trim();
+    if (title && !/^untitled$/i.test(title)) {
+      titles.push(title);
+    }
   }
-  const xml = await res.text();
-  return parseRssTitles(xml);
+  return [...new Set(titles)];
+}
+
+function parseFeedTitles(xml) {
+  if (!xml || typeof xml !== 'string') return [];
+  const looksXml = /<(rss|rdf:RDF|feed)\b/i.test(xml);
+  if (!looksXml) return [];
+  const fromItems = parseRssItemTitles(xml);
+  if (fromItems.length > 0) return fromItems;
+  return parseAtomEntryTitles(xml);
+}
+
+function rssFetchSignal() {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return AbortSignal.timeout(RSS_FETCH_TIMEOUT_MS);
+  }
+  const c = new AbortController();
+  setTimeout(() => c.abort(), RSS_FETCH_TIMEOUT_MS);
+  return c.signal;
+}
+
+async function fetchRssFeed({ url, name }) {
+  try {
+    const res = await fetch(url, {
+      headers: RSS_HEADERS,
+      signal: rssFetchSignal(),
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const xml = await res.text();
+    const titles = parseFeedTitles(xml);
+    console.info('[api/trending] RSS feed fetch result:', {
+      name,
+      url,
+      httpStatus: res.status,
+      titleCount: titles.length,
+      sampleTitles: titles.slice(0, 5),
+    });
+    return { url, name, titles };
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    console.warn('[api/trending] RSS feed fetch failed:', { name, url, error: msg });
+    throw err;
+  }
+}
+
+function trendFeedsList() {
+  const extra = (process.env.RSS_TREND_FEED_URLS || '')
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((feedUrl, i) => ({ url: feedUrl, name: `RSS ${i + 1}` }));
+  return [...extra, ...RSS_TREND_SIGNAL_FEEDS];
 }
 
 /**
- * Trend “search terms” for the LLM: try legacy Google Trends RSS, then Google News India RSS.
- * Does not throw — returns empty terms if every source fails (LLM still runs with empty RSS).
+ * Trend headlines for the LLM: parallel fetch of India-focused RSS/Atom feeds.
+ * Google Trends “daily RSS” is discontinued (404) — see https://newsapi.org/docs for news APIs; we use public RSS here.
+ * Does not throw — returns empty terms if every feed fails.
  */
 async function fetchTrendSearchSignals() {
-  for (const url of GOOGLE_TRENDS_RSS_CANDIDATES) {
-    try {
-      const titles = await fetchRssTitles(url);
-      if (titles.length > 0) {
-        return {
-          terms: titles,
-          sourceLabel: 'Google Trends (भारत) — RSS खोज शब्द',
-        };
-      }
-    } catch (e) {
-      console.warn('[api/trending] Google Trends RSS skipped:', url, e.message || e);
+  const feeds = trendFeedsList();
+  const settled = await Promise.allSettled(feeds.map((f) => fetchRssFeed(f)));
+
+  const merged = [];
+  const seen = new Set();
+  const okNames = [];
+  const errors = [];
+
+  for (let i = 0; i < settled.length; i += 1) {
+    const s = settled[i];
+    const label = feeds[i] ? feeds[i].name : String(i);
+    if (s.status !== 'fulfilled') {
+      const msg = s.reason && s.reason.message ? s.reason.message : String(s.reason);
+      errors.push(`${label}: ${msg}`);
+      continue;
+    }
+    const { name, titles } = s.value;
+    if (!titles.length) {
+      errors.push(`${name}: no titles parsed`);
+      continue;
+    }
+    okNames.push(name);
+    for (const t of titles) {
+      const key = t.toLowerCase().replace(/\s+/g, ' ').trim();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(t);
     }
   }
 
-  for (const url of GOOGLE_NEWS_RSS_FALLBACKS) {
-    try {
-      const titles = await fetchRssTitles(url);
-      if (titles.length > 0) {
-        return {
-          terms: titles.slice(0, 45),
-          sourceLabel: 'Google News (भारत) — RSS शीर्षक (ट्रेंड संकेत, Trends RSS के बदले)',
-        };
-      }
-    } catch (e) {
-      console.warn('[api/trending] Google News RSS fallback skipped:', url, e.message || e);
-    }
+  if (merged.length > 0) {
+    const labelNames = okNames.slice(0, 5).join(', ');
+    console.info(
+      `[api/trending] RSS trend signals: ${merged.length} unique headlines from ${okNames.length} feed(s) — ${labelNames}`
+    );
+    console.info('[api/trending] RSS merged headlines (preview):', merged.slice(0, 8));
+    return {
+      terms: merged.slice(0, 50),
+      sourceLabel: `भारत — RSS शीर्षक (${okNames.join(' + ')})`,
+    };
   }
 
-  console.warn('[api/trending] No RSS trend signals; continuing with NewsAPI only.');
+  console.warn(
+    `[api/trending] All RSS trend feeds failed or empty (${feeds.length} tried). Last errors:`,
+    errors.slice(0, 5).join(' | ')
+  );
   return { terms: [], sourceLabel: 'RSS उपलब्ध नहीं (सूची खाली)' };
 }
 
-async function fetchNewsHeadlines(apiKey) {
-  const url = new URL('https://newsapi.org/v2/top-headlines');
-  url.searchParams.set('country', 'in');
-  url.searchParams.set('pageSize', '30');
+const DEFAULT_NEWSAPI_TOP_HEADLINES = 'https://newsapi.org/v2/top-headlines';
+
+/**
+ * NewsAPI /v2/everything requires `q`. Build a short query from RSS terms when env URL has no `q`.
+ * Long `q` strings (many ORs / long headlines) trigger `queryTooLong` / "too complex".
+ */
+function simplifyNewsQueryTerm(t) {
+  let s = String(t).replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+  const pipe = s.indexOf(' | ');
+  if (pipe > 8) s = s.slice(0, pipe).trim();
+  const dash = s.indexOf(' - ');
+  if (dash > 10) s = s.slice(0, dash).trim();
+  s = s.replace(/["'|]/g, '').replace(/\s+/g, ' ').trim();
+  if (s.length > 36) s = s.slice(0, 36).trim();
+  return s;
+}
+
+function buildNewsEverythingQuery(signals) {
+  const envQ = (process.env.NEWSAPI_EVERYTHING_Q || '').trim();
+  if (envQ) return envQ.slice(0, 120);
+
+  const raw = (signals && Array.isArray(signals.terms) ? signals.terms : [])
+    .map(simplifyNewsQueryTerm)
+    .filter(Boolean);
+  if (raw.length === 0) {
+    return 'India';
+  }
+  const a = raw[0];
+  const b = raw[1];
+  if (!b) return a;
+  const joined = `${a} OR ${b}`;
+  return joined.length > 100 ? a : joined;
+}
+
+async function fetchNewsHeadlines(apiKey, signals = { terms: [] }) {
+  const rawBase = (process.env.GET_NEWS_API_URL || '').trim();
+  const url = rawBase ? new URL(rawBase) : new URL(DEFAULT_NEWSAPI_TOP_HEADLINES);
+  const isEverything = /\/everything\/?$/i.test(url.pathname);
+
+  if (isEverything) {
+    if (!url.searchParams.get('q')) {
+      url.searchParams.set('q', buildNewsEverythingQuery(signals));
+    }
+    if (!url.searchParams.get('pageSize')) {
+      url.searchParams.set('pageSize', '30');
+    }
+    if (!url.searchParams.get('sortBy')) {
+      url.searchParams.set('sortBy', 'publishedAt');
+    }
+  } else {
+    if (!rawBase) {
+      url.searchParams.set('country', 'in');
+    } else if (!url.searchParams.get('country') && !url.searchParams.get('sources')) {
+      url.searchParams.set('country', 'in');
+    }
+    if (!url.searchParams.get('pageSize')) {
+      url.searchParams.set('pageSize', '30');
+    }
+  }
+
   url.searchParams.set('apiKey', apiKey);
 
-  const res = await fetch(url.toString(), {
-    headers: { Accept: 'application/json' },
-  });
+  const fetchOnce = () =>
+    fetch(url.toString(), {
+      headers: { Accept: 'application/json' },
+    });
+
+  let res = await fetchOnce();
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    const canRetry =
+      isEverything &&
+      (res.status === 400 || res.status === 414) &&
+      /queryTooLong|too complex|request is too complex/i.test(errBody);
+    if (canRetry) {
+      console.warn(
+        '[api/trending] NewsAPI queryTooLong/too complex; retrying with NEWSAPI_EVERYTHING_FALLBACK_Q (default India).'
+      );
+      const fallback = (process.env.NEWSAPI_EVERYTHING_FALLBACK_Q || 'India').trim() || 'India';
+      url.searchParams.set('q', fallback.slice(0, 120));
+      url.searchParams.set('apiKey', apiKey);
+      res = await fetchOnce();
+    } else {
+      throw new Error(`NewsAPI failed: ${res.status} ${errBody.slice(0, 200)}`);
+    }
+  }
+
   if (!res.ok) {
     const t = await res.text();
     throw new Error(`NewsAPI failed: ${res.status} ${t.slice(0, 200)}`);
   }
+
   const data = await res.json();
   if (data && data.status === 'error') {
     const msg = [data.code, data.message].filter(Boolean).join(' — ') || 'NewsAPI error';
@@ -412,29 +642,36 @@ async function callGemini(apiKey, userText, signal) {
     model
   )}:generateContent`;
 
-  const res = await fetch(url, {
-    method: 'POST',
-    signal,
-    headers: {
-      'content-type': 'application/json',
-      'x-goog-api-key': apiKey,
-    },
-    body: JSON.stringify({
-      systemInstruction: {
-        parts: [{ text: buildSystemPrompt() }],
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      signal,
+      headers: {
+        'content-type': 'application/json',
+        'x-goog-api-key': apiKey,
       },
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: userText }],
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [{ text: buildSystemPrompt() }],
         },
-      ],
-      generationConfig: {
-        temperature: 0.3,
-        maxOutputTokens: 6144,
-      },
-    }),
-  });
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: userText }],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 6144,
+        },
+      }),
+    });
+  } catch (e) {
+    throw new Error(
+      `Gemini network error (${model}): ${formatNodeFetchError(e)}. Check GEMINI_API_KEY, outbound HTTPS, and DNS. If you meant to use local Llama, set LLM_PROVIDER=ollama only when this API runs on the same host as Ollama (Vercel cannot reach your laptop's 127.0.0.1).`
+    );
+  }
 
   if (!res.ok) {
     const t = await res.text();
@@ -489,22 +726,27 @@ async function callGemini(apiKey, userText, signal) {
  */
 async function callAnthropic(apiKey, userText, signal) {
   const model = process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-20241022';
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    signal,
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 2000,
-      temperature: 0.3,
-      system: buildSystemPrompt(),
-      messages: [{ role: 'user', content: userText }],
-    }),
-  });
+  let res;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      signal,
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 2000,
+        temperature: 0.3,
+        system: buildSystemPrompt(),
+        messages: [{ role: 'user', content: userText }],
+      }),
+    });
+  } catch (e) {
+    throw new Error(`Anthropic network error: ${formatNodeFetchError(e)}`);
+  }
 
   if (!res.ok) {
     const t = await res.text();
@@ -547,36 +789,89 @@ async function callAnthropic(apiKey, userText, signal) {
   return parsed;
 }
 
+/** True on Vercel production/preview (and similar), false for local Node and `vercel dev` (VERCEL_ENV=development). */
+function isVercelCloudRuntime() {
+  const env = (process.env.VERCEL_ENV || '').trim();
+  if (env === 'production' || env === 'preview') return true;
+  const vercel = (process.env.VERCEL || '').trim().toLowerCase();
+  const vercelOn = vercel === '1' || vercel === 'true';
+  if (!vercelOn) return false;
+  if (env === 'development') return false;
+  return true;
+}
+
+/** Localhost Ollama from Vercel cloud always targets the serverless VM, not the developer's machine. */
+function assertOllamaHostReachableFromRuntime() {
+  const raw = (process.env.OLLAMA_HOST || 'http://127.0.0.1:11434').trim();
+  let hostname = '';
+  try {
+    hostname = new URL(raw).hostname.toLowerCase();
+  } catch {
+    throw new Error(`OLLAMA_HOST is not a valid URL: ${raw}`);
+  }
+  const local =
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '0.0.0.0' ||
+    hostname === '::1';
+  if (local && isVercelCloudRuntime()) {
+    throw new Error(
+      'OLLAMA_HOST points at localhost but this handler runs on Vercel (production/preview). That URL is the serverless machine, not your PC — Ollama on your laptop will never get traffic or logs. Fix: set GEMINI_API_KEY (or Anthropic) for production, or run the API locally with LLM_PROVIDER=ollama. To use Ollama from the cloud you need a reachable host (VPN/tunnel/VPS) in OLLAMA_HOST, not 127.0.0.1.'
+    );
+  }
+}
+
 /**
  * Local Ollama (OpenAI-compatible chat). Same JSON contract as Gemini.
  * https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-chat-completion
  */
 async function callOllama(userText, signal) {
+  assertOllamaHostReachableFromRuntime();
   const base = (process.env.OLLAMA_HOST || 'http://127.0.0.1:11434').replace(/\/$/, '');
-  const model = process.env.OLLAMA_MODEL || 'llama3.2';
+  const model = process.env.OLLAMA_MODEL || 'llama3.1';
   const url = `${base}/api/chat`;
   const numPredict = Math.min(
     8192,
-    Math.max(512, Number(process.env.OLLAMA_NUM_PREDICT) || 2400)
+    Math.max(512, Number(process.env.OLLAMA_NUM_PREDICT) || 1400)
   );
 
-  const res = await fetch(url, {
-    method: 'POST',
-    signal,
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: buildSystemPrompt() + buildOllamaSpeedSuffix() },
-        { role: 'user', content: userText },
-      ],
-      stream: false,
-      options: {
-        temperature: 0.25,
-        num_predict: numPredict,
-      },
-    }),
+  console.info('[api/trending] Ollama: starting POST /api/chat', {
+    url,
+    model,
+    timeoutMs: getOllamaFetchTimeoutMs(),
+    userPayloadChars: userText.length,
+    num_predict: numPredict,
   });
+
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: buildSystemPrompt() + buildOllamaSpeedSuffix() },
+          { role: 'user', content: userText },
+        ],
+        stream: false,
+        options: {
+          temperature: 0.25,
+          num_predict: numPredict,
+        },
+      }),
+    });
+  } catch (e) {
+    if (isAbortLikeError(e)) {
+      throw new Error(
+        `Ollama request timed out after ${getOllamaFetchTimeoutMs()}ms (model=${model}). Raise OLLAMA_FETCH_TIMEOUT_MS (10000–${MAX_OLLAMA_FETCH_TIMEOUT_MS}, e.g. 600000), or shrink the prompt: OLLAMA_MAX_RSS_TERMS, OLLAMA_MAX_ARTICLES, and/or OLLAMA_NUM_PREDICT.`
+      );
+    }
+    throw new Error(
+      `Ollama network error (${url}, model=${model}): ${formatNodeFetchError(e)}. Run \`ollama serve\` on this machine, set OLLAMA_HOST if remote (e.g. http://host.docker.internal:11434). Cloud hosts (Vercel) cannot use http://127.0.0.1:11434 on your laptop — use Gemini there or run this API locally with LLM_PROVIDER=ollama.`
+    );
+  }
 
   if (!res.ok) {
     const t = await res.text();
@@ -622,7 +917,7 @@ async function callOllama(userText, signal) {
  */
 async function invokeLlm(useOllama, anthropicKey, geminiKey, userText) {
   if (useOllama) {
-    const raw = await callOllama(userText, createLlmAbortSignal());
+    const raw = await callOllama(userText, createOllamaAbortSignal());
     return { raw, provider: 'ollama' };
   }
 
@@ -759,7 +1054,7 @@ export default async function handler(req, res) {
     let articles = [];
     if (newsKey) {
       try {
-        articles = await fetchNewsHeadlines(newsKey);
+        articles = await fetchNewsHeadlines(newsKey, signals);
       } catch (e) {
         console.warn('[api/trending] NewsAPI skipped:', e.message || e);
       }
@@ -769,12 +1064,21 @@ export default async function handler(req, res) {
 
     const payloadOpts = useOllama
       ? {
-          maxTerms: Number(process.env.OLLAMA_MAX_RSS_TERMS) || 22,
-          maxArticles: Number(process.env.OLLAMA_MAX_ARTICLES) || 14,
+          maxTerms: Number(process.env.OLLAMA_MAX_RSS_TERMS) || 12,
+          maxArticles: Number(process.env.OLLAMA_MAX_ARTICLES) || 8,
+          slimArticles: true,
         }
       : {};
 
     const userText = buildTrendingUserPayload(signals, articles, payloadOpts);
+
+    console.info('[api/trending] LLM: invoking', {
+      provider: useOllama ? 'ollama' : 'cloud',
+      userPayloadChars: userText.length,
+      vercelCloudRuntime: isVercelCloudRuntime(),
+      VERCEL: process.env.VERCEL,
+      VERCEL_ENV: process.env.VERCEL_ENV,
+    });
 
     let topics;
     let providerHeader;
@@ -791,7 +1095,11 @@ export default async function handler(req, res) {
       if (forceRefresh) {
         throw llmErr;
       }
-      console.warn('[api/trending] LLM failed, using FALLBACK_DATA:', llmErr.message || llmErr);
+      const extra =
+        llmErr && llmErr.cause
+          ? ` | cause: ${llmErr.cause.message || String(llmErr.cause)}`
+          : '';
+      console.warn('[api/trending] LLM failed, using FALLBACK_DATA:', (llmErr.message || llmErr) + extra);
       topics = FALLBACK_DATA;
       providerHeader = 'fallback';
     }
@@ -810,15 +1118,21 @@ export default async function handler(req, res) {
         hint:
           detail.includes('NewsAPI')
             ? 'NewsAPI often blocks serverless/datacenter IPs on the free plan; use a paid key or run API from an allowed network.'
-            : detail.includes('Anthropic')
-              ? 'Check ANTHROPIC_API_KEY and ANTHROPIC_MODEL; see https://docs.anthropic.com/en/api/errors'
-              : detail.includes('Gemini')
-                ? 'Check GEMINI_API_KEY (Google AI Studio) and GEMINI_MODEL in env; free tier limits apply — see https://ai.google.dev/pricing'
-                : detail.includes('Ollama') || detail.includes('fetch failed')
-                  ? 'Start Ollama (`ollama serve`), pull a model (`ollama pull llama3.2`), set LLM_PROVIDER=ollama and OLLAMA_MODEL to match `ollama list`.'
-                  : detail.includes('aborted') || detail.includes('AbortError') || detail.includes('TimeoutError')
-                    ? `LLM request exceeded ${LLM_FETCH_TIMEOUT_MS}ms (AbortController). Omit ?refresh=true to receive demo FALLBACK_DATA when the model is slow.`
-                    : undefined,
+            : detail.includes('Gemini network error')
+              ? 'Gemini could not complete the HTTP request. Verify GEMINI_API_KEY and GEMINI_MODEL, and that this host allows outbound HTTPS to generativelanguage.googleapis.com.'
+              : detail.includes('Anthropic')
+                ? 'Check ANTHROPIC_API_KEY and ANTHROPIC_MODEL; see https://docs.anthropic.com/en/api/errors'
+                : detail.includes('Gemini')
+                  ? 'Check GEMINI_API_KEY (Google AI Studio) and GEMINI_MODEL in env; free tier limits apply — see https://ai.google.dev/pricing'
+                  : detail.includes('Ollama network error') || detail.includes('Ollama API failed')
+                    ? 'Ollama: run `ollama serve` on the same machine as this API (or set OLLAMA_HOST to a reachable URL). Vercel/cloud cannot call Ollama on your laptop via 127.0.0.1 — use Gemini in prod or run `scripts/local-api.mjs` / dev-stack locally with LLM_PROVIDER=ollama.'
+                    : detail.includes('Ollama request timed out')
+                      ? `Ollama exceeded OLLAMA_FETCH_TIMEOUT_MS (default ${DEFAULT_OLLAMA_FETCH_TIMEOUT_MS / 1000}s, max ${MAX_OLLAMA_FETCH_TIMEOUT_MS / 1000}s). Raise the env var, or lower OLLAMA_NUM_PREDICT / OLLAMA_MAX_RSS_TERMS / OLLAMA_MAX_ARTICLES so the model finishes sooner.`
+                      : detail.includes('fetch failed')
+                        ? 'Low-level fetch failed — expand the error message for "cause:" (e.g. ECONNREFUSED = wrong host/port). Local Llama only works when the Node process can reach that OLLAMA_HOST.'
+                        : detail.includes('aborted') || detail.includes('AbortError') || detail.includes('TimeoutError')
+                          ? `LLM (cloud) request exceeded ${getLlmFetchTimeoutMs()}ms. For Ollama use OLLAMA_FETCH_TIMEOUT_MS. Omit ?refresh=true for FALLBACK_DATA when the model is slow.`
+                          : undefined,
       })
     );
   }
