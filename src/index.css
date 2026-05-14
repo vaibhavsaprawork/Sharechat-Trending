@@ -1,0 +1,333 @@
+html[data-theme='dark'] {
+  --bg-primary: #111318;
+  --bg-secondary: #1a1c22;
+  --bg-card: #1a1c22;
+  --border: #1e2028;
+  --text-primary: #ffffff;
+  --text-secondary: #888888;
+  --text-tertiary: #555555;
+  --accent: #ff5c35;
+
+  --bg: var(--bg-primary);
+  --card: var(--bg-card);
+  --text: var(--text-primary);
+  --muted: var(--text-secondary);
+  --frame: #0f0f0f;
+  --maxw: 390px;
+
+  --header-bg: transparent;
+  --header-border: transparent;
+  --header-shadow: none;
+  --phone-outer-line: rgba(255, 255, 255, 0.04);
+  --status-bar: rgba(255, 255, 255, 0.92);
+  --status-icons: rgba(255, 255, 255, 0.85);
+  --icon-btn-bg: rgba(26, 28, 34, 0.85);
+  --icon-btn-color: rgba(255, 255, 255, 0.72);
+  --theme-toggle-bg: rgba(26, 28, 34, 0.85);
+
+  --feed-pill-bg: rgba(26, 28, 34, 0.65);
+  --feed-pill-color: rgba(255, 255, 255, 0.86);
+  --feed-pill-active-bg: rgba(255, 92, 53, 0.12);
+  --feed-pill-active-color: #ffffff;
+  --feed-pill-active-border: rgba(255, 92, 53, 0.55);
+  --feed-pill-dot: var(--accent);
+  --feed-pill-border: var(--border);
+
+  --elev-card-shadow: none;
+  --elev-card-border: 1px solid var(--border);
+
+  --heat-hot-bg: #2d1810;
+  --heat-hot-border: #ff5c35;
+  --heat-hot-text: #ff5c35;
+  --heat-rising-bg: #2d2010;
+  --heat-rising-border: #ffb74d;
+  --heat-rising-text: #ffb74d;
+  --heat-viral-bg: #1a2010;
+  --heat-viral-border: #8bc34a;
+  --heat-viral-text: #8bc34a;
+  --heat-cool-bg: #1a1c22;
+  --heat-cool-border: #555555;
+  --heat-cool-text: #666666;
+  --heat-divider: var(--heat-hot-border);
+
+  --skeleton-base: #16181f;
+  --skeleton-shine-mid: #2e3340;
+
+  --ai-section-bg: #1a1c22;
+  --ai-section-border-left: #ff5c35;
+  --sources-section-bg: var(--bg-card);
+  --source-row-text: rgba(255, 255, 255, 0.86);
+
+  --tabs-bar-bg: rgba(26, 28, 34, 0.65);
+  --tab-color: rgba(255, 255, 255, 0.65);
+  --tab-active-bg: rgba(255, 92, 53, 0.14);
+  --tab-active-color: #ffffff;
+  --tab-active-border: rgba(255, 92, 53, 0.35);
+  --tab-active-underline: transparent;
+
+  --back-btn-bg: rgba(26, 28, 34, 0.85);
+  --hero-base-bg: #14161c;
+  --stat-card-bg: #1a1c22;
+  --heat-bar-title: rgba(255, 255, 255, 0.9);
+  --bar-track: rgba(255, 255, 255, 0.06);
+  --section-body: rgba(255, 255, 255, 0.86);
+  --crumb-trail-accent: rgba(255, 255, 255, 0.92);
+  --hero-sub: rgba(255, 255, 255, 0.86);
+  --card-divider: rgba(255, 255, 255, 0.06);
+  --post-user: #ffffff;
+  --post-time: var(--text-secondary);
+  --post-text: #cccccc;
+  --post-actions: #666666;
+  --video-title: #ffffff;
+  --video-meta: var(--text-secondary);
+  --reel-caption: rgba(255, 255, 255, 0.92);
+  --reel-hearts: var(--accent);
+  --related-title: rgba(255, 255, 255, 0.86);
+  --related-pill-border: #2a2a35;
+  --related-pill-color: var(--text-secondary);
+  --play-circle-bg: rgba(255, 255, 255, 0.95);
+  --play-circle-fg: #111318;
+  --avatar-text: #ffffff;
+  --avatar-ring: rgba(255, 255, 255, 0.12);
+  --stat-icon-ring: rgba(255, 255, 255, 0.06);
+  --error-bg: rgba(255, 92, 53, 0.08);
+  --error-border: rgba(255, 92, 53, 0.35);
+  --error-text: rgba(255, 255, 255, 0.92);
+  --error-detail: rgba(255, 255, 255, 0.65);
+  --tag-title: #ffffff;
+  --tag-rank: #444444;
+  --tag-desc: var(--text-secondary);
+  --accent-soft: rgba(255, 92, 53, 0.35);
+  --lang-pill-active-fg: #ffffff;
+  --lang-pill-active-bg: var(--accent);
+  --lang-pill-inactive-fg: #888888;
+  --lang-pill-inactive-bg: transparent;
+  --saved-empty-icon: var(--text-tertiary);
+
+  --cat-pill-ring: rgba(255, 255, 255, 0.08);
+  --cat-icon-ring: rgba(255, 255, 255, 0.06);
+
+  --cat-khel-fg: #4caf50;
+  --cat-khel-bg: #1a2e1a;
+  --cat-samachar-fg: #9c6fe4;
+  --cat-samachar-bg: #1e1a2e;
+  --cat-manoranjan-fg: #ff5c35;
+  --cat-manoranjan-bg: #2e1a1a;
+  --cat-mausam-fg: #4fc3f7;
+  --cat-mausam-bg: #1a2530;
+  --cat-vitt-fg: #ffb74d;
+  --cat-vitt-bg: #2a2518;
+  --cat-tyohar-fg: #e91e8c;
+  --cat-tyohar-bg: #2e1e2a;
+  --cat-rajniti-fg: #9c6fe4;
+  --cat-rajniti-bg: #1e1a2e;
+  --cat-taknik-fg: #4fc3f7;
+  --cat-taknik-bg: #1a2530;
+
+  --video-grad-end: #111318;
+  --reel-grad-end: #0d0f14;
+
+  --source-dot-0: var(--accent);
+  --source-dot-1: #4fc3f7;
+  --source-dot-2: #9c6fe6;
+}
+
+html[data-theme='light'] {
+  --bg-primary: #f5f5f7;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --border: #e5e5ea;
+  --text-primary: #1a1a1a;
+  --text-secondary: #666666;
+  --text-tertiary: #999999;
+  --accent: #ff5c35;
+
+  --bg: var(--bg-primary);
+  --card: var(--bg-card);
+  --text: var(--text-primary);
+  --muted: var(--text-secondary);
+  --frame: #e8e8ec;
+  --maxw: 390px;
+
+  --header-bg: #ffffff;
+  --header-border: #e5e5ea;
+  --header-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --phone-outer-line: rgba(0, 0, 0, 0.06);
+  --status-bar: #1a1a1a;
+  --status-icons: #333333;
+  --icon-btn-bg: #ffffff;
+  --icon-btn-color: #444444;
+  --theme-toggle-bg: #ffffff;
+
+  --feed-pill-bg: #efefef;
+  --feed-pill-color: #666666;
+  --feed-pill-active-bg: #ff5c35;
+  --feed-pill-active-color: #ffffff;
+  --feed-pill-active-border: var(--accent);
+  --feed-pill-dot: #ffffff;
+  --feed-pill-border: var(--border);
+
+  --elev-card-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  --elev-card-border: none;
+
+  --heat-hot-bg: #fff0eb;
+  --heat-hot-border: #ff5c35;
+  --heat-hot-text: #cc3a1a;
+  --heat-rising-bg: #fff8ec;
+  --heat-rising-border: #ffb74d;
+  --heat-rising-text: #996600;
+  --heat-viral-bg: #f0f8ec;
+  --heat-viral-border: #66bb6a;
+  --heat-viral-text: #2e7d32;
+  --heat-cool-bg: #f5f5f7;
+  --heat-cool-border: #e0e0e0;
+  --heat-cool-text: #666666;
+  --heat-divider: var(--heat-hot-border);
+
+  --skeleton-base: #ececef;
+  --skeleton-shine-mid: #d9d9de;
+
+  --ai-section-bg: #fff8f5;
+  --ai-section-border-left: #ff5c35;
+  --sources-section-bg: #fafafa;
+  --source-row-text: #333333;
+
+  --tabs-bar-bg: #ffffff;
+  --tab-color: var(--text-secondary);
+  --tab-active-bg: transparent;
+  --tab-active-color: var(--text-primary);
+  --tab-active-border: transparent;
+  --tab-active-underline: var(--accent);
+
+  --back-btn-bg: #ffffff;
+  --hero-base-bg: #e8e8ed;
+  --stat-card-bg: #ffffff;
+  --heat-bar-title: var(--text-primary);
+  --bar-track: rgba(0, 0, 0, 0.08);
+  --section-body: #333333;
+  --crumb-trail-accent: var(--text-primary);
+  --hero-sub: rgba(26, 26, 26, 0.85);
+  --card-divider: rgba(0, 0, 0, 0.06);
+  --post-user: var(--text-primary);
+  --post-time: var(--text-secondary);
+  --post-text: #444444;
+  --post-actions: var(--text-secondary);
+  --video-title: var(--text-primary);
+  --video-meta: var(--text-secondary);
+  --reel-caption: rgba(26, 26, 26, 0.92);
+  --reel-hearts: var(--accent);
+  --related-title: var(--text-primary);
+  --related-pill-border: var(--border);
+  --related-pill-color: var(--text-secondary);
+  --play-circle-bg: #ffffff;
+  --play-circle-fg: #111318;
+  --avatar-text: #ffffff;
+  --avatar-ring: rgba(255, 255, 255, 0.2);
+  --stat-icon-ring: rgba(0, 0, 0, 0.08);
+  --error-bg: rgba(255, 92, 53, 0.08);
+  --error-border: rgba(255, 92, 53, 0.35);
+  --error-text: var(--text-primary);
+  --error-detail: var(--text-secondary);
+  --tag-title: var(--text-primary);
+  --tag-rank: var(--text-tertiary);
+  --tag-desc: var(--text-secondary);
+  --accent-soft: rgba(255, 92, 53, 0.35);
+  --lang-pill-active-fg: #ffffff;
+  --lang-pill-active-bg: var(--accent);
+  --lang-pill-inactive-fg: #888888;
+  --lang-pill-inactive-bg: transparent;
+  --saved-empty-icon: var(--text-tertiary);
+
+  --cat-pill-ring: rgba(0, 0, 0, 0.08);
+  --cat-icon-ring: rgba(0, 0, 0, 0.08);
+
+  --cat-khel-fg: #2e7d32;
+  --cat-khel-bg: #e8f5e9;
+  --cat-samachar-fg: #6a1b9a;
+  --cat-samachar-bg: #f3e5f5;
+  --cat-manoranjan-fg: #d84315;
+  --cat-manoranjan-bg: #fbe9e7;
+  --cat-mausam-fg: #0277bd;
+  --cat-mausam-bg: #e1f5fe;
+  --cat-vitt-fg: #ef6c00;
+  --cat-vitt-bg: #fff3e0;
+  --cat-tyohar-fg: #c2185b;
+  --cat-tyohar-bg: #fce4ec;
+  --cat-rajniti-fg: #6a1b9a;
+  --cat-rajniti-bg: #f3e5f5;
+  --cat-taknik-fg: #0277bd;
+  --cat-taknik-bg: #e1f5fe;
+
+  --video-grad-end: #f5f5f7;
+  --reel-grad-end: #ececef;
+
+  --source-dot-0: var(--accent);
+  --source-dot-1: #0288d1;
+  --source-dot-2: #7b1fa2;
+}
+
+.catIconTint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--cat-icon-ring);
+}
+
+.catIconTint[data-cat='खेल'],
+.catPill[data-cat='खेल'] {
+  color: var(--cat-khel-fg);
+  background: var(--cat-khel-bg);
+}
+
+.catIconTint[data-cat='समाचार'],
+.catPill[data-cat='समाचार'] {
+  color: var(--cat-samachar-fg);
+  background: var(--cat-samachar-bg);
+}
+
+.catIconTint[data-cat='मनोरंजन'],
+.catPill[data-cat='मनोरंजन'] {
+  color: var(--cat-manoranjan-fg);
+  background: var(--cat-manoranjan-bg);
+}
+
+.catIconTint[data-cat='मौसम'],
+.catPill[data-cat='मौसम'] {
+  color: var(--cat-mausam-fg);
+  background: var(--cat-mausam-bg);
+}
+
+.catIconTint[data-cat='वित्त'],
+.catPill[data-cat='वित्त'] {
+  color: var(--cat-vitt-fg);
+  background: var(--cat-vitt-bg);
+}
+
+.catIconTint[data-cat='त्योहार'],
+.catPill[data-cat='त्योहार'] {
+  color: var(--cat-tyohar-fg);
+  background: var(--cat-tyohar-bg);
+}
+
+.catIconTint[data-cat='राजनीति'],
+.catPill[data-cat='राजनीति'] {
+  color: var(--cat-rajniti-fg);
+  background: var(--cat-rajniti-bg);
+}
+
+.catIconTint[data-cat='तकनीक'],
+.catPill[data-cat='तकनीक'] {
+  color: var(--cat-taknik-fg);
+  background: var(--cat-taknik-bg);
+}
+
+.catPill {
+  border-color: var(--cat-pill-ring);
+}
+
+* {
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease;
+}

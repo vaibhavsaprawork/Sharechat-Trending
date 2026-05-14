@@ -1,0 +1,64 @@
+.shell {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  background: var(--frame);
+}
+
+.phone {
+  width: 100%;
+  max-width: var(--maxw);
+  min-height: 100vh;
+  background: var(--bg);
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px var(--phone-outer-line);
+}
+
+.views {
+  position: relative;
+  min-height: 100vh;
+}
+
+.feedPane,
+.detailPane {
+  position: absolute;
+  inset: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: var(--bg);
+  will-change: transform, opacity;
+}
+
+.feedPane {
+  z-index: 1;
+  transition:
+    transform 200ms ease-in,
+    opacity 200ms ease-in;
+}
+
+.detailPane {
+  z-index: 2;
+  transition:
+    transform 200ms ease-in,
+    opacity 200ms ease-in;
+}
+
+.feedHidden {
+  transform: translateX(-28%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.detailHidden {
+  transform: translateX(100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.detailVisible {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
