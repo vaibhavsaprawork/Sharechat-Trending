@@ -12,7 +12,7 @@ A mobile-first trending tags system for India's Hindi-speaking audience — auto
 |---|---|
 | **Live Prototype** | https://sharechat-trending-zeta.vercel.app/ |
 | **GitHub Repo** | https://github.com/vaibhavsaprawork/Sharechat-Trending |
-| **Loom Walkthrough** | [Add Loom URL here] |
+| **Loom Walkthrough** | https://www.loom.com/share/e25c8b6ad4804451a3d5d778a345d818 |
 | **Screenshot** | See `/screenshot.png` in this repo |
 
 ---
