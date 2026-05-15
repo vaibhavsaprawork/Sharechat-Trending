@@ -7,40 +7,23 @@
 .topBar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 48px;
-  padding: 0 12px 0 8px;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  padding: 10px 14px 10px 12px;
+  background: var(--detail-nav-bar-bg);
   border-bottom: 1px solid var(--detail-topbar-border);
 }
 
 .backZone {
   flex-shrink: 0;
+  position: relative;
 }
 
 .back {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  /* extends .navCircleBtn in JSX */
   border: none;
-  background: transparent;
-  color: var(--detail-back-icon);
-}
-
-@media (hover: hover) {
-  .back:hover {
-    background: rgba(0, 0, 0, 0.05);
-  }
-
-  html[data-theme='dark'] .back:hover {
-    background: rgba(255, 255, 255, 0.06);
-  }
-}
-
-.back:active {
-  transform: scale(0.96);
+  padding: 0;
 }
 
 .crumb {
@@ -49,23 +32,91 @@
   gap: 0;
   min-width: 0;
   flex: 1;
+  text-align: center;
+}
+
+.navEnd {
+  flex-shrink: 0;
+  position: relative;
+  width: 40px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.moreBtn {
+  border: none;
+  padding: 0;
+}
+
+.moreMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 168px;
+  padding: 6px 0;
+  border-radius: 12px;
+  border: 1px solid var(--detail-topbar-border);
+  background: var(--bg-card);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22);
+  z-index: 30;
+}
+
+.moreMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 14px;
+  border: none;
+  background: none;
+  font-size: var(--font-body);
+  font-weight: 500;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .moreMenuItem:hover {
+    background: rgba(0, 0, 0, 0.04);
+  }
+
+  html[data-theme='dark'] .moreMenuItem:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
 }
 
 .crumbTrail {
   font-size: 13px;
   font-weight: 400;
   line-height: 1.4;
-  color: var(--detail-crumb);
 }
 
-.crumbTrailAccent {
-  color: var(--detail-crumb);
+.topBar .crumbTrail {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.topBar .crumbTrailAccent {
+  color: rgba(255, 255, 255, 0.96);
   font-weight: 500;
 }
 
-.crumbSep {
-  opacity: 0.55;
+.topBar .crumbSep {
+  opacity: 0.45;
   margin: 0 4px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+html[data-theme='light'] .topBar .crumbTrail {
+  color: rgba(18, 62, 64, 0.62);
+}
+
+html[data-theme='light'] .topBar .crumbTrailAccent {
+  color: rgba(10, 52, 56, 0.92);
+}
+
+html[data-theme='light'] .topBar .crumbSep {
+  color: rgba(18, 62, 64, 0.38);
 }
 
 .hero {

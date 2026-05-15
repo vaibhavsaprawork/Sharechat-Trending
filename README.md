@@ -1,124 +1,420 @@
-# ShareChat Trending
+# ShareChat Trending Tags
 
-मोबाइल‑फर्स्ट “ट्रेंडिंग टैग” वेब ऐप — भारत के हिंदी दर्शकों के लिए। फ्रंटएंड React + Vite है, बैकएंड Vercel सर्वरलेस `/api/trending` पर चलता है।
+> APM Assignment Submission | Built by Vaibhav
 
-## पाइपलाइन (संक्षेप)
+A mobile-first trending tags system for India's Hindi-speaking audience — automatically identifying what's trending in India today and surfacing it through a polished, native-feeling app prototype.
 
-हर `GET /api/trending` अनुरोध पर (कोई कैश नहीं):
+---
 
-1. **RSS ट्रेंड संकेत (भारत)** — Google Trends RSS (अक्सर 404) या **Google News भारत RSS**।
-2. **NewsAPI** (वैकल्पिक) — भारत की हेडलाइनें; कुंजी न हो तो सूची खाली, सिर्फ़ RSS।
-3. **LLM** — डिफ़ॉल्ट **Gemini** (क्लाउड); वैकल्पिक **`LLM_PROVIDER=ollama`** से **Mac पर स्थानीय [Ollama](https://ollama.com/)** (Llama आदि)।
-4. प्रतिक्रिया **JSON ऐरे** + **CORS**; सफलता पर **`X-LLM-Provider: gemini | ollama`** हेडर।
+## 🔗 Submission Links
 
-## आवश्यक एनवायरनमेंट वेरिएबल
+| | |
+|---|---|
+| **Live Prototype** | https://sharechat-trending-zeta.vercel.app/ |
+| **GitHub Repo** | https://github.com/vaibhavsaprawork/Sharechat-Trending |
+| **Loom Walkthrough** | [Add Loom URL here] |
+| **Screenshot** | See `/screenshot.png` in this repo |
 
-### Gemini (डिफ़ॉल्ट)
+---
 
-- `GEMINI_API_KEY` — [Google AI Studio](https://aistudio.google.com/apikey) (वैकल्पिक नाम: `GOOGLE_GENERATIVE_AI_API_KEY`)
-- (वैकल्पिक) `GEMINI_MODEL` — डिफ़ॉल्ट `gemini-2.0-flash` (404 पर `gemini-1.5-flash`)
+## Part 1 — How the Trending Tags System Works
 
-`LLM_PROVIDER` सेट न करें या `gemini` रखें।
+### Data Sources
 
-### Ollama (मैक पर ऑन‑प्रिमाइस, बिना Gemini कुंजी)
+The pipeline pulls from two live sources on every request — no caching, always fresh:
 
-1. [Ollama](https://ollama.com/) इंस्टॉल करें, मॉडल खींचें: `ollama pull llama3.2` (या जो नाम `ollama list` में हो)।
-2. `.env.local` में:
+**1. Google Trends India (RSS)**
+```
+https://trends.google.com/trends/trendingsearches/daily/rss?geo=IN
+```
+No API key required. Returns the top daily trending searches in India. Strongest signal for active search intent. Falls back to Google News India RSS if the Trends endpoint returns 404.
 
-```bash
-LLM_PROVIDER=ollama
-OLLAMA_MODEL=llama3.2
-# OLLAMA_HOST=http://127.0.0.1:11434   # डिफ़ॉल्ट
+**2. NewsAPI — India Headlines**
+```
+https://newsapi.org/v2/top-headlines?country=in&pageSize=30
+```
+Returns top 30 headlines from Indian sources (NDTV, Times of India, Hindustan Times, Aaj Tak) with title, description, source name, publish time, and `urlToImage` — which powers hero images in the feed. Optional — if no key is set, only RSS signals are used.
+
+### Why These Two Sources
+
+| Signal | What it tells us | Weight |
+|---|---|---|
+| Google Trends | Active search intent — people are looking this up right now | High |
+| NewsAPI headlines | Editorial importance — journalists are covering it | Medium-High |
+| Cross-signal overlap | Topic appears in both → confirmed, widespread trend | 1.25× bonus |
+
+**What I considered and rejected:**
+- Twitter/X API — now paid ($100/month minimum), not feasible
+- Reddit India — good signal but skews urban/English, not representative of ShareChat's Tier 2/3 audience
+- YouTube Trending — good for entertainment but requires OAuth, too complex for v1
+
+---
+
+### Scoring & Ranking Logic
+
+There is **no** separate numeric “composite score” computed in code before the LLM. RSS headlines and NewsAPI articles are **deduped, trimmed, and merged into the user prompt**; the **LLM assigns rank order, `heatScore` (1–100), and `heatLabel`**, and `api/trending.js` then **normalizes** those fields (sane defaults, allowed labels, category resolution, quality filters for placeholder titles, optional JSON salvage for truncated Ollama output).
+
+---
+
+### LLM Enrichment Layer
+
+After raw signals are collected, they're sent to the LLM in a structured prompt. The LLM does the heavy lifting:
+
+1. **Merges and deduplicates** — "IPL Final" and "MI vs CSK" become one tag
+2. **Final ranking** — ordered list of 10 trending topics
+3. **Generates Hindi output** — hashtag, display name, 2-sentence description
+4. **AI Summary** *(bonus)* — 3-4 sentence Hindi analysis of why this is trending
+5. **Classifies** — one of **10** Hindi categories: खेल, समाचार, मनोरंजन, मौसम, वित्त, त्योहार, राजनीति, तकनीक, शिक्षा, स्वास्थ्य
+6. **Heat score** — 1-100 numeric score with Hindi label
+7. **Filters** — removes topics irrelevant to Hindi-speaking Indian audience
+
+**LLM options supported:**
+
+| Provider | When to use | Config |
+|---|---|---|
+| **Gemini** (default) | Cloud deploy, Vercel | `GEMINI_API_KEY`, optional `GEMINI_MODEL` (default `gemini-2.0-flash`) |
+| **Anthropic Claude** (optional cloud) | Tried **before** Gemini when the key is set | `ANTHROPIC_API_KEY`, optional `ANTHROPIC_MODEL` |
+| **Ollama** (local) | `LLM_PROVIDER=ollama` | `OLLAMA_HOST`, `OLLAMA_MODEL`, `OLLAMA_NUM_CTX`, etc. |
+
+**Why Gemini as default:** Free tier via Google AI Studio, fast on Vercel serverless, strong Hindi output. If a model name returns HTTP 404, set `GEMINI_MODEL` manually in env (there is **no** automatic fallback to another model in code).
+
+**Ollama note:** Local Llama on Mac is significantly slower than Gemini. Each article is sent individually rather than all at once — avoids context overload and timeouts. `num_ctx` set to 8192 to prevent long prompts being truncated. For speed: use a smaller model (`llama3.2:1b`) or reduce `TRENDING_TOPIC_COUNT`.
+
+---
+
+### Output Schema
+
+```json
+{
+  "rank": 1,
+  "hashtag": "#IPL2026Final",
+  "hindiName": "IPL 2026 फाइनल",
+  "description": "MI बनाम CSK का महामुकाबला आज वानखेड़े में।",
+  "aiSummary": "IPL 2026 का फाइनल मुकाबला आज मुंबई के वानखेड़े स्टेडियम में खेला जाएगा...",
+  "category": "खेल",
+  "heatScore": 98,
+  "heatLabel": "बहुत गर्म",
+  "sources": ["Google Trends India — #1", "NewsAPI — 340 articles"],
+  "imageUrl": "https://...",
+  "relatedTags": ["#MIvsCSK", "#Rohit", "#Dhoni"]
+}
 ```
 
-3. `ollama serve` चल रहा हो (आम तौर पर ऐप स्वयं)।
+---
 
-**गति:** Mac पर लोकल Llama **Gemini से कहीं धीमा** होता है — JSON (डिफ़ॉल्ट **10 विषय**, प्रति श्रेणी एक, हिंदी फ़ील्ड) CPU/GPU पर सेकंडों से मिनट तक ले सकता है। इस रिपो में Ollama पथ पर **छोटा प्रॉम्प्ट** (कम RSS शब्द / कम NewsAPI आर्टिकल) और **`OLLAMA_NUM_PREDICT`** पहले से ट्यून हैं। और तेज़ चाहें तो छोटा मॉडल (`llama3.2:1b` जैसा), `TRENDING_TOPIC_COUNT` कम करना, या `OLLAMA_NUM_PREDICT=2200` आज़माएँ (`.env.example` देखें)।
+### Pipeline Diagram
 
-**ध्यान:** Vercel सर्वरलेस पर डिफ़ॉल्ट `127.0.0.1` **आपके Mac पर Ollama नहीं पहुँचता**। क्लाउड डिप्लॉय के लिए Gemini रखें, या सुरक्षित टनल/गेटवे पर Ollama और `OLLAMA_HOST` सेट करें।
+```
+┌─────────────────────────────────────────────────────────┐
+│                   ON EVERY REQUEST                      │
+│                   (no cache, live)                      │
+└─────────────────────────────────────────────────────────┘
+          │                             │
+          ▼                             ▼
+┌──────────────────┐          ┌──────────────────┐
+│  Google Trends   │          │    NewsAPI        │
+│  India RSS       │          │  /top-headlines   │
+│  (no key needed) │          │  ?country=in      │
+└────────┬─────────┘          └────────┬──────────┘
+         │ trending searches           │ 30 articles
+         │ + positions                 │ + images + sources
+         └─────────────┬───────────────┘
+                       │
+                       ▼
+           ┌───────────────────────┐
+           │   Merge & pack prompt │
+           │                       │
+           │  • Dedupe articles      │
+           │  • RSS + News payload   │
+           └───────────┬───────────┘
+                       │
+                       ▼
+           ┌───────────────────────┐
+           │   LLM Layer           │
+           │                       │
+           │  Anthropic (opt.) OR  │
+           │  Gemini (cloud) OR    │
+           │  Ollama (local)       │
+           │                       │
+           │  • Final ranking      │
+           │  • Hindi generation   │
+           │  • Category tagging   │
+           │  • Heat score         │
+           │  • AI summary (bonus) │
+           │  • Related hashtags   │
+           └───────────┬───────────┘
+                       │
+                       ▼
+           ┌───────────────────────┐
+           │   Output Filter       │
+           │                       │
+           │  • Remove unknowns    │
+           │  • Validate schema    │
+           │  • Trim to k tags     │
+           │  • Fallback if error  │
+           └───────────┬───────────┘
+                       │
+                       ▼
+           ┌───────────────────────┐
+           │  /api/trending        │
+           │  JSON response        │
+           │  + CORS headers       │
+           │  + X-LLM-Provider     │
+           └───────────┬───────────┘
+                       │
+                       ▼
+           ┌───────────────────────┐
+           │   React Frontend      │
+           │                       │
+           │  Feed View            │
+           │  → Detail View        │
+           │  → Posts/Videos/Reels │
+           └───────────────────────┘
+```
 
-### अन्य
+---
 
-- `NEWSAPI_KEY` — वैकल्पिक; न हो तो केवल RSS सिग्नल LLM को जाते हैं।
-- `TRENDING_TOPIC_COUNT` — वैकल्पिक, पूर्णांक **1–10**; डिफ़ॉल्ट **10** (प्रत्येक श्रेणि में एक टॉपिक: खेल, समाचार, मनोरंजन, मौसम, वित्त, त्योहार, राजनीति, तकनीक, शिक्षा, स्वास्थ्य)।
+## Part 2 — App Prototype
 
-उदाहरण: `.env.example`। **लोकल:** `sharechat-trending/.env.local`। **Vercel:** डैशबोर्ड में env (`.env.local` डिप्लॉय नहीं होता)।
+### Research: ShareChat Today vs This Redesign
 
-## लोकल चलाना
+Before designing anything, I used the ShareChat app extensively. Here's what I found and how I responded:
 
-### एक कमांड (सिफारिश)
+| Problem in ShareChat today | What I designed instead |
+|---|---|
+| Trending tags use emojis as category indicators (🏏🎬) — feels cheap and inconsistent | Proper Lucide icons with colored rounded squares — systematic and scalable |
+| No visual hierarchy — all tags look identical in weight | Hero images + heat badges + rank numbers — instant visual priority |
+| Tag detail view is thin — just a list of posts | Full detail: AI analysis, signal sources, trend pulse chart, tabbed Posts/Videos/Reels |
+| No freshness signal — can't tell if trend is 2 hrs or 2 days old | Heat score (1-100) + label (बहुत गर्म / वायरल) + "Updated moments ago" |
+| English-only UI chrome even for Hindi content | Full Hindi UI with EN toggle — content stays Hindi, chrome translates |
+| Single fixed theme | Dark theme (ShareChat-native) + Light theme (Google News-inspired) |
+| No way to save or revisit content | Bookmark on every post, Saved tab in detail view |
 
-रूट में `.env.local` रखें (Gemini: `GEMINI_API_KEY`; या **Ollama**: `LLM_PROVIDER=ollama` + `OLLAMA_MODEL`)। फिर:
+---
+
+### UX Rationale
+
+**Why dark theme as default?**
+ShareChat's primary users are on mid-range Android devices, many with AMOLED screens. Dark themes save battery — black pixels are off pixels. It also matches ShareChat's existing visual language so the prototype feels immediately native.
+
+**Why hero images on feed cards?**
+Images dramatically increase tap-through rates in Indian content consumption patterns. The image communicates what a trend is about before a single word is read — critical for fast-scrolling users and lower-literacy audiences that ShareChat specifically serves.
+
+**Why the heat badge design?**
+A plain number (98) means nothing. "बहुत गर्म" alone has no scale. Together — `🔥 98 | बहुत गर्म` in a colored pill — they communicate urgency immediately. Color shifts by score: red for 90+, amber for 75+, green for 60+. This borrows from Groww and Zerodha's color-as-urgency pattern, already a learned signal for Indian users.
+
+**Why Posts / Videos / Reels tabs in detail view?**
+ShareChat users primarily consume video and short-form content. A dedicated Reels tab acknowledges this reality. Posts give depth, Videos give context, Reels give entertainment — matching how Indian users actually engage with trends rather than forcing a text-first, Western news pattern.
+
+**Why Hindi content but toggleable UI language?**
+ShareChat's content is Hindi-first — translating trend descriptions would break authenticity. But many urban users (heavy trending feature users) are bilingual and more comfortable with English UI chrome. The toggle respects both without compromising either.
+
+**Why category filter pills at the top?**
+Users arrive at trending with intent — a cricket fan wants खेल, not politics. The filter is the first interaction after opening. Top placement minimises scroll distance to relevant content. Borrowed from Google News's tab pattern which has strong usage evidence in India.
+
+**Why light theme follows Google News's design language?**
+Google News is the most-used news app in India. Its card-based, typography-first light theme is a familiar, trusted pattern. Using the same visual grammar (white cards, shadow instead of borders, Roboto typography, black active pills) makes the light theme feel immediately credible and readable.
+
+**What I considered and rejected:**
+- Infinite scroll — rejected because trending is finite and curated. Artificial infinite scroll would devalue the curation signal
+- Search within trending — category filter covers 80% of intent without the complexity
+- Swipe gesture between trends — conflicts with vertical scroll, too easy to trigger accidentally
+
+**Why the prototype doesn't start from ShareChat's home page:**
+The assignment scopes specifically to the Trending Tags feature. Starting from the trending feed directly shows focused product thinking. The bottom navigation bar provides enough app context that this clearly sits within a larger product. A full implementation would embed this as a tab within ShareChat's existing navigation.
+
+**Bonus — AI विश्लेषण:**
+Every trend detail view shows a 3-4 sentence Hindi AI summary: what is this trend, why today specifically, what's the broader context, how fast it's spreading. This gives users genuine value beyond a headline — especially for finance and politics where context matters deeply. This is the explicit bonus requirement from the assignment.
+
+---
+
+## Tech Stack
+
+| Layer | Technology | Why |
+|---|---|---|
+| Frontend | React + Vite | Fast build, easy Vercel deploy |
+| Styling | CSS Variables + plain CSS | Full theme control, no Tailwind overhead |
+| Icons | Lucide React | Consistent, lightweight, tree-shakeable |
+| Font | Noto Sans Devanagari + Roboto | Best Hindi rendering + Google News feel |
+| Backend | Node.js Vercel serverless | Same repo, zero config deploy |
+| Trends source | Google Trends RSS | Free, no key, reliable |
+| News source | NewsAPI | Free tier, India-specific, returns images |
+| LLM (cloud, default) | Gemini 2.0 Flash | Free via AI Studio, fast, good Hindi |
+| LLM (cloud, optional) | Anthropic Claude | When `ANTHROPIC_API_KEY` is set, API tries Claude before Gemini |
+| LLM (local) | Ollama + LLaMA 3.2 | Free local inference, no API key needed |
+| Hosting | Vercel | Free tier, instant deploy, edge CDN |
+
+**AI tools used to build this:**
+- Claude (Anthropic) — system design, prompt engineering, component architecture, README
+- Cursor — code generation and iteration throughout
+- Gemini / optional Anthropic Claude — LLM enrichment in production API paths
+- All code was reviewed, understood, and modified throughout
+
+---
+
+## Running Locally
+
+### Recommended (one command)
+
+Add `.env.local` to the project root, then:
 
 ```bash
 npm install
 npm run dev:stack
 ```
 
-यह एक साथ **लोकल API** और **Vite** चलाता है। पोर्ट **3000 व्यस्त** हो तो खाली पोर्ट (3001, 3002, …) अपने आप चुना जाता है; प्रॉक्सी उसी से मेल खाती है।
+Runs the local API and Vite together. If port 3000 is busy, an open port is chosen automatically and the proxy syncs to match.
 
-### अलग टर्मिनल (वैकल्पिक)
+### Environment Variables
 
-**टर्मिनल 1 — API**
-
+**Gemini (default — cloud):**
 ```bash
-npm run dev:api
+GEMINI_API_KEY=your_key_here        # free at aistudio.google.com/apikey
+GEMINI_MODEL=gemini-2.0-flash       # optional, this is the default
+NEWSAPI_KEY=your_key_here           # optional, free at newsapi.org/register
+TRENDING_TOPIC_COUNT=10             # optional, 1-10, default 10
 ```
 
-`scripts/local-api.mjs` Vercel CLI के बिना `api/trending.js` चलाता है (डिफ़ॉल्ट `http://127.0.0.1:3000`, या env `PORT`) और `.env.local` / `.env` लोड करता है।
-
-**टर्मिनल 2 — फ्रंटएंड**
-
+**Anthropic (optional — cloud, tried before Gemini when set):**
 ```bash
-npm run dev
+ANTHROPIC_API_KEY=your_key_here
+# ANTHROPIC_MODEL=claude-3-5-haiku-20241022   # optional
 ```
 
-अगर API किसी और पोर्ट पर है (उदा. 3000 पर `EADDRINUSE`), दोनों टर्मिनल में वही पोर्ट दें:
-
+**Ollama (local Mac, no API key):**
 ```bash
-PORT=3001 npm run dev:api
-# दूसरे टर्मिनल:
-VITE_DEV_API_PORT=3001 npm run dev
+LLM_PROVIDER=ollama
+OLLAMA_MODEL=llama3.2               # must match output of `ollama list`
+OLLAMA_NUM_CTX=8192                 # default, prevents prompt truncation
+OLLAMA_NUM_PREDICT=2800             # default
+# OLLAMA_HOST=http://127.0.0.1:11434  # default, usually not needed
 ```
 
-या सिर्फ **`npm run dev:stack`** — पोर्ट अपने आप मिल जाता है।
+Make sure `ollama serve` is running before starting the dev server.
 
-### Vercel CLI से API (पैरिटी टेस्ट)
+See `.env.example` for the full list.
+
+### All Scripts
 
 ```bash
-npm run dev:vercel
+npm run dev:stack    # API + Vite together — recommended for local dev
+npm run dev          # Vite only (need separate API terminal)
+npm run dev:api      # Local API only (port 3000 or $PORT)
+npm run dev:vercel   # API via Vercel CLI (optional)
+npm run build        # Production build
+npm run preview      # Preview production build
 ```
 
-(पहले `npm i -g vercel` या `npx vercel`।)
+---
 
-## डिप्लॉय (Vercel)
+## Deploy to Vercel
 
-- रिपॉज़िटरी Vercel से कनेक्ट करें।
-- `GEMINI_API_KEY` (क्लाउड के लिए) और वैकल्पिक `NEWSAPI_KEY` प्रोडक्शन एनव में सेट करें। Ollama सिर्फ़ तभी जब आपका API सर्वर उस होस्ट तक पहुँच सके (सामान्य Vercel + `127.0.0.1` नहीं)।
-- बिल्ड: `npm run build`, आउटपुट: `dist` (Vite डिफ़ॉल्ट)।
+1. Connect this repo to Vercel
+2. Set in Vercel dashboard → Environment Variables:
+   - `GEMINI_API_KEY` (required for cloud unless you use Anthropic only)
+   - `ANTHROPIC_API_KEY` (optional — if set, API tries Claude before Gemini)
+   - `NEWSAPI_KEY` (optional but recommended)
+3. Build command: `npm run build`, output directory: `dist`
 
-`vercel.json` में SPA फ़ॉलबैक रिराइट है ताकि भविष्य में क्लाइंट रूटिंग जोड़ने पर भी होस्टिंग ठीक रहे।
+> **Note:** Ollama at `127.0.0.1` is not reachable from Vercel serverless. Use Gemini or Anthropic for cloud deploy.
 
-## स्क्रिप्ट
+---
 
-- `npm run dev:stack` — **API + Vite एक साथ** (लोकल डेव के लिए सिफारिश)
-- `npm run dev` — सिर्फ Vite (अलग से `npm run dev:api` चलाना ज़रूरी)
-- `npm run dev:api` — सिर्फ लोकल API (`scripts/local-api.mjs`; पोर्ट `PORT` या 3000)
-- `npm run dev:vercel` — Vercel CLI से API (वैकल्पिक)
-- `npm run build` — प्रोडक्शन बिल्ड
-- `npm run preview` — बिल्ड प्रीव्यू
+## Troubleshooting
 
-## समस्या निवारण (API फेल हो तो)
+| Problem | Fix |
+|---|---|
+| `EADDRINUSE` / port 3000 busy | Use `npm run dev:stack` — auto-picks an open port |
+| `ECONNREFUSED` / request failed | Only Vite is running — use `npm run dev:stack` |
+| NewsAPI error in 200 response | Key wrong, quota hit, or datacenter IP blocked on free plan |
+| Gemini 404 / model not found | Confirm key at [AI Studio](https://aistudio.google.com/apikey) and set `GEMINI_MODEL` to a model your project can call (no automatic model fallback in code) |
+| Ollama timeout | Reduce `TRENDING_TOPIC_COUNT`, use `llama3.2:1b`, ensure `ollama serve` is running |
+| "अज्ञात विषय" appearing | LLM couldn't identify topic — filtered out automatically; more NewsAPI coverage helps |
 
-- **`EADDRINUSE` / पोर्ट 3000 व्यस्त**: पुराना `vercel dev` या कोई और सर्वर बंद करें, या **`npm run dev:stack`** चलाएँ — खाली पोर्ट चुनकर API और Vite दोनों सिंक रहते हैं।
-- **`ECONNREFUSED` / `अनुरोध असफल`**: सिर्फ `npm run dev` चल रहा है और API नहीं — **`npm run dev:stack`** या पहले `npm run dev:api`।
-- **NewsAPI**: कई बार **200** के साथ बॉडी में `{ "status": "error", ... }` आता है (कुंजी गलत, कोटा, या **सर्वरलेस IP ब्लॉक**)। अब API इसे स्पष्ट त्रुटि के रूप में फेंकती है। फ्री प्लान पर डेटासेंटर IP ब्लॉक हो तो पेड प्लान या दूसरा न्यूज़ स्रोत ज़रूरी हो सकता है।
-- **Gemini**: `GEMINI_API_KEY` ([AI Studio](https://aistudio.google.com/apikey)), वैकल्पिक `GEMINI_MODEL` — [मूल्य नीति / सीमा](https://ai.google.dev/pricing)।
-- **Ollama**: `LLM_PROVIDER=ollama`, `ollama serve`, सही `OLLAMA_MODEL` — [Ollama API](https://github.com/ollama/ollama/blob/main/docs/api.md)।
+---
 
-## संरचना
+## What I'd Build Next (4 more weeks)
 
-- `api/trending.js` — Vercel फ़ंक्शन
-- `src/App.jsx` — फ़ीड / डिटेल नेविगेशन
-- `src/components/*` — UI कंपोनेंट
-- `src/styles/*` — CSS (टेलविंड नहीं)
+**Week 1 — Better signals**
+- Add Reddit India (r/india, r/cricket, r/bollywood) as third source
+- Add YouTube Trending India — top 20 videos
+- Weight by source credibility (NDTV > random blog)
+- Time-decay so older trends rank lower
+
+**Week 2 — Personalisation**
+- User interest graph based on which trends they tap and save
+- "Trending for you" vs "Trending in India" split feed
+- Location-aware trends: Mumbai users see Mumbai Barish higher
+- Hinglish vs pure Hindi preference detection
+
+**Week 3 — Creator side**
+- "Create on this trend" — opens post composer pre-tagged with the hashtag
+- Trend velocity alerts — notify creators when a trend is just starting to spike
+- Creator leaderboard per trend — who's getting the most engagement
+
+**Week 4 — Analytics & trust**
+- Trend accuracy score — post-hoc validation of predictions
+- Source transparency — show exactly which outlets drove a trend
+- Misinformation filter — flag trends spreading false information
+- A/B test: card layout vs horizontal scroll vs stories format
+
+---
+
+## Project Structure
+
+```
+/
+├── api/
+│   ├── trending.js              # Vercel serverless function (trending pipeline)
+│   └── llm-health.js            # Optional GET /api/llm-health connectivity checks
+├── scripts/
+│   ├── local-api.mjs            # Local API runner (no Vercel CLI needed)
+│   └── dev-stack.mjs            # Runs API + Vite together (npm run dev:stack)
+├── src/
+│   ├── main.jsx
+│   ├── App.jsx
+│   ├── index.css
+│   ├── components/
+│   │   ├── FeedView.jsx         # Feed + category pills + bottom nav + bottom sheets
+│   │   ├── DetailView.jsx
+│   │   ├── TagCard.jsx
+│   │   ├── HeatBadge.jsx
+│   │   ├── LoadingSkeleton.jsx
+│   │   ├── BottomSheet.jsx
+│   │   └── StreamingFeedLoader.jsx
+│   ├── context/
+│   │   └── AppChromeContext.jsx # Theme, locale (hi/en), saved posts
+│   ├── lib/
+│   │   ├── translations.jsx
+│   │   ├── categories.jsx
+│   │   └── detailDemoContent.js
+│   └── styles/
+│       ├── global.css
+│       ├── App.module.css
+│       ├── FeedView.module.css
+│       ├── DetailView.module.css
+│       ├── TagCard.module.css
+│       ├── HeatBadge.module.css
+│       ├── LoadingSkeleton.module.css
+│       ├── BottomSheet.module.css
+│       └── StreamingFeedLoader.module.css
+├── public/
+│   └── screenshot.png
+├── .env.example
+├── vercel.json
+├── vite.config.js
+└── README.md
+```
+
+---
+
+## Assumptions
+
+- Post counts shown are estimates derived from heat score — ShareChat's actual counts are not publicly available
+- Mock posts/videos/reels in detail tabs are illustrative — a real implementation would call ShareChat's internal content API filtered by hashtag
+- Images sourced from NewsAPI `urlToImage`; fallback to curated category images when unavailable
+- Trend freshness guaranteed by live API calls on every page load with no server-side caching
+
+---
+
+*Built in ~12 hours. Designed for Bharat. Made with curiosity.*

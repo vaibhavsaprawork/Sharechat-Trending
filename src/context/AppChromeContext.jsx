@@ -6,7 +6,7 @@ import {
   useMemo,
   useState,
 } from 'react';
-import { T } from '../lib/translations.js';
+import { T } from '../lib/translations.jsx';
 
 const STORAGE_THEME = 'sharechat-theme';
 const STORAGE_LOCALE = 'sharechat-locale';

@@ -1,7 +1,8 @@
 /**
  * Vercel Node.js serverless: GET /api/trending
- * Pipeline: RSS (India headlines) → optional NewsAPI (top-headlines or GET_NEWS_API_URL e.g. /v2/everything) → LLM → JSON
+ * Pipeline: RSS (India headlines) → optional NewsAPI → LLM → JSON
  * Query: ?refresh=true — no FALLBACK_DATA on LLM failure (returns error instead).
+ * Query: ?stream=1 — Ollama only: Server-Sent Events; one smaller /api/chat per news article (see .env.example).
  */
 
 const CORS_HEADERS = {
@@ -53,6 +54,96 @@ function createOllamaAbortSignal() {
   const controller = new AbortController();
   setTimeout(() => controller.abort(), getOllamaFetchTimeoutMs());
   return controller.signal;
+}
+
+/** Context window for Ollama (input + output must fit). Default 4096 often truncates long RSS+News payloads + system prompt. */
+function getOllamaNumCtx() {
+  const n = parseInt(process.env.OLLAMA_NUM_CTX, 10);
+  if (Number.isFinite(n) && n >= 2048 && n <= 32768) {
+    return n;
+  }
+  return 8192;
+}
+
+/** When `OLLAMA_DEBUG_CURL=1`, logs the exact POST body and a copy-pastable curl (see `.env.example`). */
+function isOllamaDebugCurl() {
+  return String(process.env.OLLAMA_DEBUG_CURL || '').trim() === '1';
+}
+
+function ollamaDebugMaxChars(envKey, fallback) {
+  const n = parseInt(process.env[envKey], 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function trimDebugLog(text, maxChars) {
+  const s = String(text);
+  if (s.length <= maxChars) return s;
+  return `${s.slice(0, maxChars)}\n… [truncated, total ${s.length} chars]`;
+}
+
+/**
+ * @param {string} url
+ * @param {object} chatBody
+ * @param {string} passLabel
+ */
+function logOllamaDebugRequest(url, chatBody, passLabel) {
+  if (!isOllamaDebugCurl()) return;
+  const bodyMax = ollamaDebugMaxChars('OLLAMA_DEBUG_MAX_BODY_CHARS', 500_000);
+  const bodyPretty = JSON.stringify(chatBody, null, 2);
+  const urlLit = JSON.stringify(url);
+  console.info(
+    [
+      `[api/trending] Ollama DEBUG request (${passLabel})`,
+      '',
+      '# Save the following block as request-body.json, then run:',
+      `curl -sS -X POST ${urlLit} -H 'Content-Type: application/json' --data-binary @request-body.json`,
+      '',
+      '# --- request-body.json ---',
+      trimDebugLog(bodyPretty, bodyMax),
+      '',
+    ].join('\n')
+  );
+}
+
+/**
+ * @param {string} passLabel
+ * @param {unknown} data
+ */
+function logOllamaDebugResponseJson(passLabel, data) {
+  if (!isOllamaDebugCurl()) return;
+  const max = ollamaDebugMaxChars('OLLAMA_DEBUG_MAX_RESPONSE_CHARS', 500_000);
+  let pretty;
+  try {
+    pretty = JSON.stringify(data, null, 2);
+  } catch (e) {
+    pretty = `[could not JSON.stringify response: ${e && e.message ? e.message : e}]`;
+  }
+  console.info(
+    [
+      `[api/trending] Ollama DEBUG response (${passLabel}) — JSON returned by Ollama POST /api/chat:`,
+      '',
+      trimDebugLog(pretty, max),
+      '',
+    ].join('\n')
+  );
+}
+
+/**
+ * @param {string} passLabel
+ * @param {number} status
+ * @param {string} text
+ */
+function logOllamaDebugErrorBody(passLabel, status, text) {
+  if (!isOllamaDebugCurl()) return;
+  const max = ollamaDebugMaxChars('OLLAMA_DEBUG_MAX_RESPONSE_CHARS', 500_000);
+  console.info(
+    [
+      `[api/trending] Ollama DEBUG response (${passLabel}) — HTTP ${status} body:`,
+      '',
+      trimDebugLog(text, max),
+      '',
+    ].join('\n')
+  );
 }
 
 function isAbortLikeError(err) {
@@ -281,12 +372,125 @@ const TREND_CATEGORIES = [
   'स्वास्थ्य',
 ];
 
+const TREND_CAT_SET = new Set(TREND_CATEGORIES);
+
+/** Map common English category labels from models to our Hindi `TREND_CATEGORIES` keys. */
+const CATEGORY_EN_TO_HI = {
+  sports: 'खेल',
+  sport: 'खेल',
+  news: 'समाचार',
+  entertainment: 'मनोरंजन',
+  weather: 'मौसम',
+  finance: 'वित्त',
+  festival: 'त्योहार',
+  politics: 'राजनीति',
+  tech: 'तकनीक',
+  technology: 'तकनीक',
+  education: 'शिक्षा',
+  health: 'स्वास्थ्य',
+};
+
+/**
+ * @param {unknown} raw
+ * @returns {string | null} member of TREND_CATEGORIES, or null if unknown
+ */
+function resolveToCanonicalCategory(raw) {
+  const t = String(raw ?? '')
+    .trim()
+    .normalize('NFC');
+  if (!t) return null;
+  if (TREND_CAT_SET.has(t)) return t;
+  const lo = t.toLowerCase();
+  if (CATEGORY_EN_TO_HI[lo]) return CATEGORY_EN_TO_HI[lo];
+  return null;
+}
+
+/** True when the run asks for one topic per category covering all 10 slots. */
+function isFullCategoryDeckForK(k) {
+  return k >= TREND_CATEGORIES.length;
+}
+
+/** True when we ask the LLM for one topic per category covering all 10 slots. */
+function isFullCategoryDeck() {
+  return isFullCategoryDeckForK(topicTargetCount());
+}
+
+/**
+ * Best-effort category from hashtags/copy when the model mislabels (e.g. NEET as खेल).
+ * Uses Latin + Devanagari hints; returns null if unclear.
+ * @param {{ hashtag?: string, hindiName?: string, description?: string, aiSummary?: string }} row
+ * @returns {string | null}
+ */
+function inferTrendCategoryFromText(row) {
+  const blob = [row.hashtag, row.hindiName, row.description, row.aiSummary]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  const edu =
+    /नीट|neet|परीक्षा|पेपर|लीक|बोर्ड|छात्र|शिक्षा|university|college|admission|jee|upsc|cbse|icse|स्कूल|विद्यालय|campus|degree|scholarship|result|marksheet|exam\b|examination/i.test(
+      blob
+    );
+  const sport =
+    /ipl\b|क्रिकेट|cricket|t20\b|odi\b|batsman|wicket|वर्ल्ड\s*कप|world\s+cup|football|hockey|olympic|stadium|मैच\s*\(|vs\.?\s*australia|ind\s*vs/i.test(
+      blob
+    );
+  if (edu && !sport) return 'शिक्षा';
+  if (sport && !edu) return 'खेल';
+
+  const pol =
+    /चुनाव|bjp|congress|कांग्रेस|मुख्यमंत्री|सीएम\b|pm\b|संसद|विधानसभा|राजनीति|मंत्री|govt|government|court|hc\b|high\s+court|supreme\s+court/i.test(
+      blob
+    );
+  if (pol && !sport) return 'राजनीति';
+
+  const health =
+    /स्वास्थ्य|hospital|doctor|covid|vaccine|मौत|death|disease|patient|उपचार|clinic|mental\s+health/i.test(
+      blob
+    );
+  if (health) return 'स्वास्थ्य';
+
+  const weather = /मौसम|बारिश|rain|monsoon|imd\b|cyclone|temperature|heatwave|flood|snow/i.test(blob);
+  if (weather) return 'मौसम';
+
+  const fin =
+    /rbi\b|repo|stock|share|sensex|nifty|rupee|export|import|gdp|budget|bank|loan|crypto|finance|invest/i.test(
+      blob
+    );
+  if (fin) return 'वित्त';
+
+  const ent =
+    /bollywood|trailer|movie|film|cinema|actor|actress|album|song|concert|oscar|cannes|netflix|series|ट्रेलर|फिल्म|सिनेमा/i.test(
+      blob
+    );
+  if (ent) return 'मनोरंजन';
+
+  const tech =
+    /ai\b|chip|semiconductor|smartphone|android|iphone|app\b|startup|cyber|hack|software|5g\b|internet|google|microsoft/i.test(
+      blob
+    );
+  if (tech) return 'तकनीक';
+
+  const fest = /त्योहार|festival|diwali|दिवाली|holi|eid|ईद|navratri|christmas|pongal|lohri|rakhi/i.test(blob);
+  if (fest) return 'त्योहार';
+
+  return null;
+}
+
 function topicTargetCount() {
   const n = parseInt(process.env.TRENDING_TOPIC_COUNT, 10);
   if (Number.isFinite(n) && n >= 1 && n <= TREND_CATEGORIES.length) {
     return n;
   }
   return TREND_CATEGORIES.length;
+}
+
+/** Trim any topic list to `TRENDING_TOPIC_COUNT` and renumber `rank` (LLM + fallback paths). */
+function sliceTopicsToLimit(topics) {
+  const k = topicTargetCount();
+  if (!Array.isArray(topics) || topics.length === 0) return topics;
+  const slice = topics.slice(0, k);
+  return slice.map((item, i) => ({ ...item, rank: i + 1 }));
 }
 
 function buildTrendingUserPayload(signals, articles, opts = {}) {
@@ -300,7 +504,7 @@ function buildTrendingUserPayload(signals, articles, opts = {}) {
     slice = slice.map((a) => ({
       title: a.title || '',
       source: a.source || '',
-      imageUrl: a.imageUrl || '',
+      imageUrl: truncateStringForLlm(a.imageUrl || '', 220),
     }));
   }
   const newsLabel = opts.slimArticles
@@ -315,15 +519,24 @@ function buildTrendingUserPayload(signals, articles, opts = {}) {
     newsLabel,
     JSON.stringify(slice, null, 0),
     '',
-    `उपरोक्त को मर्ज करके ठीक ${k} ट्रेंडिंग विषय JSON ऐरे में लौटाओ — प्रत्येक आइटम की "category" अलग हो (${TREND_CATEGORIES.slice(0, k).join(', ')})।`,
+    (() => {
+      const full = isFullCategoryDeck();
+      if (full) {
+        return `उपरोक्त को मर्ज करके ठीक ${k} ट्रेंडिंग विषय JSON ऐरे में लौटाओ — प्रत्येक आइटम की "category" अलग हो (${TREND_CATEGORIES.join(', ')})।`;
+      }
+      return `उपरोक्त को मर्ज करके ठीक ${k} ट्रेंडिंग विषय JSON ऐरे में लौटाओ — प्रत्येक आइटम की "category" नीचे दी पूरी सूची में से उस शीर्षक के लिए सबसे सही श्रेणी हो (${TREND_CATEGORIES.join(', ')})। उदाहरण: नीट/परीक्षा/पेपर लीक → शिक्षा; क्रिकेट/IPL → खेल; चुनाव/अदालत/सीएम → राजनीति — खेल तभी जब खेल की खबर हो।`;
+    })(),
   ].join('\n');
 }
 
 function buildSystemPrompt() {
   const k = topicTargetCount();
-  const categoriesForRun = TREND_CATEGORIES.slice(0, k);
-  const catList = categoriesForRun.join(', ');
-  return `You are a trending topics analyst for ShareChat, India's leading Hindi social media platform. Your audience is Hindi-speaking users from Bharat — tier 2 and tier 3 cities, age 18-35.
+  const allCats = TREND_CATEGORIES.join(', ');
+  const fullDeck = isFullCategoryDeck();
+
+  if (fullDeck) {
+    const catList = TREND_CATEGORIES.join(', ');
+    return `You are a trending topics analyst for ShareChat, India's leading Hindi social media platform. Your audience is Hindi-speaking users from Bharat — tier 2 and tier 3 cities, age 18-35.
 
 You must merge, deduplicate, and output exactly ${k} trending topics from the provided RSS trend signals (when present) and India news headlines.
 
@@ -356,15 +569,61 @@ Rules:
 - "imageUrl": copy a relevant imageUrl from the news list when available; else "".
 - "relatedTags": 3-4 related Hindi hashtags.
 - Filter out topics irrelevant to Indian Hindi-speaking audience.
-- Prioritize: cricket, Bollywood, Indian politics, Indian festivals, Indian weather, Indian finance news, board exams / education news, public health and wellness stories relevant to India.
+- GROUNDING (mandatory): Each topic MUST be clearly based on at least one headline from the RSS title list OR one item from the news JSON (paraphrase is OK). Do NOT invent events (e.g. a live India–Australia cricket match) unless those exact stories appear in the provided lists. If the lists are about politics, exams, ships, diplomacy, etc., output those — do not substitute unrelated cricket/IPL filler.
+- When several signals fit, prefer themes that actually appear in the lists: cricket/Bollywood/politics/etc. only if supported by those headlines.
+- If you cannot identify a clear trending topic from a headline, skip it entirely — do not return placeholder or unknown entries. Only return topics you can clearly name in Hindi (real "hindiName" and "hashtag", never "अज्ञात विषय" or generic fillers).
+- Ranks must be 1..${k} unique, sorted by importance.`;
+  }
+
+  return `You are a trending topics analyst for ShareChat, India's leading Hindi social media platform. Your audience is Hindi-speaking users from Bharat — tier 2 and tier 3 cities, age 18-35.
+
+You must merge, deduplicate, and output exactly ${k} trending topics from the provided RSS trend signals (when present) and India news headlines.
+
+Category rules (you are returning fewer than 10 topics):
+- Each object must use a DISTINCT "category" chosen from this full list by best semantic fit to the story: ${allCats}.
+- "category" must be exactly one of those Hindi labels. Examples: NEET / boards / paper leak / university → शिक्षा; cricket / IPL / match → खेल; elections / CM / court / party → राजनीति; RBI / markets / exports → वित्त; IMD / rain / cyclone → मौसम; films / trailers / stars → मनोरंजन; apps / AI / 5G / cyber → तकनीक; hospitals / disease / public health → स्वास्थ्य; major festivals → त्योहार; broad national breaking news with no better bucket → समाचार.
+- Do NOT use खेल for exam or admission stories. Do NOT use शिक्षा for cricket.
+
+Return ONLY a valid JSON array (no markdown fences, no explanation). Each element must be an object with exactly these keys:
+{
+  "rank": number,
+  "hashtag": string,
+  "hindiName": string,
+  "description": string,
+  "aiSummary": string,
+  "category": string,
+  "heatScore": number,
+  "heatLabel": string,
+  "sources": string[],
+  "imageUrl": string,
+  "relatedTags": string[]
+}
+
+Rules:
+- "hashtag": Hindi-style hashtag (Latin script OK for names/brands).
+- "hindiName": Hindi display name for the topic.
+- "description": exactly 2 sentences in Hindi explaining why it is trending.
+- "aiSummary": 3-4 sentences in Hindi — deeper bonus analysis.
+- "category": exactly one of: ${allCats} — must match the story, not a default.
+- "heatScore": integer 1-100
+- "heatLabel": exactly one of: बहुत गर्म, तेज़ी से बढ़ रहा, वायरल, उभरता हुआ
+- "sources": 2-3 short Hindi strings describing signals (e.g. गूगल ट्रेंड्स, समाचार स्रोत).
+- "imageUrl": copy a relevant imageUrl from the news list when available; else "".
+- "relatedTags": 3-4 related Hindi hashtags.
+- GROUNDING (mandatory): Each topic MUST be clearly based on at least one RSS title OR one news JSON item. Do not invent unrelated events.
+- If you cannot identify a clear trending topic from a headline, skip it entirely — do not return placeholder or unknown entries. Only return topics you can clearly name in Hindi (real "hindiName" and "hashtag", never "अज्ञात विषय" or generic fillers).
 - Ranks must be 1..${k} unique, sorted by importance.`;
 }
 
 function buildOllamaSpeedSuffix() {
   const k = topicTargetCount();
+  const full = isFullCategoryDeck();
+  const catHint = full
+    ? 'Each object must include all required keys; one distinct category per fixed slot.'
+    : `Pick "category" from the full 10 Hindi types by story fit (e.g. NEET → शिक्षा, not खेल). ${k} distinct categories.`;
   return `
 
-Speed note (local inference): JSON only, no markdown. Keep each "description" to 1 short Hindi sentence and "aiSummary" to 2 short Hindi sentences (not 3–4). Still return exactly ${k} items with all required keys, one distinct category per item.`;
+Speed note (local inference): Return ONLY valid JSON. Root value must be a JSON array (first character [, last ]). No markdown fences, or commentary before or after. The array MUST contain exactly ${k} complete objects — stopping early or emitting fewer than ${k} items is wrong. Keep each "description" to 1 short Hindi sentence and "aiSummary" to 2 short Hindi sentences (not 3–4). ${catHint}`;
 }
 
 function setCors(res) {
@@ -625,13 +884,89 @@ async function fetchNewsHeadlines(apiKey, signals = { terms: [] }) {
     throw new Error(`NewsAPI: ${msg}`);
   }
   const articles = Array.isArray(data.articles) ? data.articles : [];
-  return articles.map((a) => ({
+  const mapped = articles.map((a) => ({
     title: a.title || '',
     description: a.description || '',
     url: a.url || '',
     imageUrl: a.urlToImage || '',
     source: (a.source && a.source.name) || '',
   }));
+  return dedupeNewsArticles(mapped);
+}
+
+/**
+ * Strip tracking params so the same story from slightly different URLs still dedupes.
+ * @param {string} u
+ */
+function normalizeUrlForArticleDedupe(u) {
+  const raw = String(u || '').trim();
+  if (!raw) return '';
+  try {
+    const x = new URL(raw);
+    x.hash = '';
+    for (const p of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref', 'fbclid']) {
+      x.searchParams.delete(p);
+    }
+    return x.href.toLowerCase();
+  } catch {
+    return raw.toLowerCase();
+  }
+}
+
+/**
+ * Remove duplicate NewsAPI rows (same canonical URL or same normalized title).
+ * @param {{ title?: string, url?: string }[]} list
+ */
+function dedupeNewsArticles(list) {
+  if (!Array.isArray(list) || list.length === 0) return list;
+  const seen = new Set();
+  const out = [];
+  for (const a of list) {
+    const urlKey = normalizeUrlForArticleDedupe(a.url || '');
+    const titleKey = String(a.title || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .slice(0, 180);
+    const key = urlKey.length > 14 ? `u:${urlKey}` : `t:${titleKey}`;
+    if (key.length < 5) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(a);
+  }
+  return out;
+}
+
+/** Stable identity for a trending card (hashtag preferred, else Hindi title). */
+function topicIdentityKey(topic) {
+  let h = String(topic.hashtag || '').trim().toLowerCase();
+  h = h.replace(/^#+/, '');
+  if (h) return `h:#${h}`;
+  const n = String(topic.hindiName || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .slice(0, 120);
+  return `n:${n}`;
+}
+
+/**
+ * Drop duplicate stories while preserving order and renumbering rank.
+ * @param {unknown[]} topics
+ */
+function dedupeTrendTopicsPreservingOrder(topics) {
+  if (!Array.isArray(topics) || topics.length === 0) return topics;
+  const seen = new Set();
+  const out = [];
+  for (const t of topics) {
+    if (!t || typeof t !== 'object') continue;
+    const k = topicIdentityKey(/** @type {Record<string, unknown>} */ (t));
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(t);
+  }
+  if (out.length === topics.length) return topics;
+  return out.map((item, i) => ({ ...item, rank: i + 1 }));
 }
 
 /**
@@ -719,7 +1054,72 @@ async function callGemini(apiKey, userText, signal) {
     throw new Error('Gemini JSON was not an array');
   }
 
-  return parsed;
+  const filtered = filterLlmQualityTopicRows(parsed);
+  if (filtered.length === 0) {
+    throw new Error(
+      'Gemini returned no topics passing quality filters (require real hindiName, hashtag, heatScore ≥ 20; no placeholder names).'
+    );
+  }
+  return filtered;
+}
+
+/** Hindi/Latin placeholders — reject rows whose title matches these substrings (after trim + NFC). */
+const INVALID_TREND_HINDI_SUBSTRINGS = [
+  'अज्ञात विषय',
+  'अज्ञात',
+  'unknown',
+  'Unknown',
+  'अज्ञात topic',
+  'N/A',
+  'null',
+];
+
+/**
+ * Raw LLM JSON objects (Gemini / Anthropic / Ollama) before `normalizeTopics`.
+ * @param {unknown[]} parsed
+ * @returns {unknown[]}
+ */
+function filterLlmQualityTopicRows(parsed) {
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((tag) => {
+    if (!tag || typeof tag !== 'object') return false;
+    const o = /** @type {Record<string, unknown>} */ (tag);
+    const hi = String(o.hindiName ?? '')
+      .trim()
+      .normalize('NFC');
+    const ht = String(o.hashtag ?? '').trim();
+    if (!hi) return false;
+    if (!ht) return false;
+    const hiLower = hi.toLowerCase();
+    if (INVALID_TREND_HINDI_SUBSTRINGS.some((n) => n && hiLower.includes(String(n).toLowerCase()))) {
+      return false;
+    }
+    if (hi.length < 3) return false;
+    const heat = Number(o.heatScore);
+    if (!Number.isFinite(heat) || heat < 20) return false;
+    return true;
+  });
+}
+
+/**
+ * After `normalizeTopics` mapping — drops rows that are still empty/placeholder (e.g. bad LLM keys).
+ * @param {Record<string, unknown>} row
+ * @returns {boolean}
+ */
+function passesNormalizedTrendQuality(row) {
+  const hi = String(row.hindiName ?? '')
+    .trim()
+    .normalize('NFC');
+  const ht = String(row.hashtag ?? '').trim();
+  if (!hi || hi.length < 3) return false;
+  if (!ht) return false;
+  const hiLower = hi.toLowerCase();
+  if (INVALID_TREND_HINDI_SUBSTRINGS.some((n) => n && hiLower.includes(String(n).toLowerCase()))) {
+    return false;
+  }
+  const heat = Number(row.heatScore);
+  if (!Number.isFinite(heat) || heat < 20) return false;
+  return true;
 }
 
 /**
@@ -788,7 +1188,13 @@ async function callAnthropic(apiKey, userText, signal) {
     throw new Error('Anthropic JSON was not an array');
   }
 
-  return parsed;
+  const filtered = filterLlmQualityTopicRows(parsed);
+  if (filtered.length === 0) {
+    throw new Error(
+      'Anthropic returned no topics passing quality filters (require real hindiName, hashtag, heatScore ≥ 20; no placeholder names).'
+    );
+  }
+  return filtered;
 }
 
 /** True on Vercel production/preview (and similar), false for local Node and `vercel dev` (VERCEL_ENV=development). */
@@ -824,25 +1230,360 @@ function assertOllamaHostReachableFromRuntime() {
 }
 
 /**
- * Local Ollama (OpenAI-compatible chat). Same JSON contract as Gemini.
- * https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-chat-completion
+ * Find the first top-level JSON array substring (respects quoted strings) for sloppy model output.
+ * @param {string} text
+ * @returns {string | null}
  */
-async function callOllama(userText, signal) {
-  assertOllamaHostReachableFromRuntime();
-  const base = (process.env.OLLAMA_HOST || 'http://127.0.0.1:11434').replace(/\/$/, '');
-  const model = process.env.OLLAMA_MODEL || 'llama3.1';
-  const url = `${base}/api/chat`;
-  const numPredict = Math.min(
-    8192,
-    Math.max(512, Number(process.env.OLLAMA_NUM_PREDICT) || 1400)
+function extractTopLevelJsonArray(text) {
+  const s = String(text).trim();
+  const start = s.indexOf('[');
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === '\\') {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '[') depth += 1;
+    else if (ch === ']') {
+      depth -= 1;
+      if (depth === 0) return s.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/**
+ * @param {unknown} parsed
+ * @returns {unknown[] | null}
+ */
+function coerceTrendingArray(parsed) {
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === 'object') {
+    const o = /** @type {Record<string, unknown>} */ (parsed);
+    for (const key of [
+      'trends',
+      'topics',
+      'data',
+      'items',
+      'results',
+      'tags',
+      'trending',
+      'trending_topics',
+      'trendingTags',
+    ]) {
+      if (Array.isArray(o[key])) return o[key];
+    }
+  }
+  return null;
+}
+
+/**
+ * Remove trailing commas before `}` or `]` (common invalid JSON from LLMs).
+ * @param {string} s
+ */
+function repairTrailingCommasInJson(s) {
+  let out = String(s);
+  for (let i = 0; i < 6; i++) {
+    const next = out.replace(/,(\s*[}\]])/g, '$1');
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
+/**
+ * Normalize sloppy model JSON: line separators, trailing commas, integer heatScore.
+ * @param {string} s
+ */
+function sanitizeOllamaTrendJsonText(s) {
+  let t = String(s).trim();
+  t = t.replace(/\u2028|\u2029/g, ' ');
+  t = repairTrailingCommasInJson(t);
+  t = t.replace(/"heatScore"\s*:\s*([0-9]+(?:\.[0-9]+)?)/gi, (_, num) => {
+    const n = Number(num);
+    if (!Number.isFinite(n)) return '"heatScore":50';
+    const v = Math.min(100, Math.max(1, Math.round(n)));
+    return `"heatScore":${v}`;
+  });
+  return t;
+}
+
+/**
+ * If the model truncated output, find a prefix ending in `]` that parses as a non-empty JSON array.
+ * @param {string} s
+ * @returns {unknown[] | null}
+ */
+function tryParseByTruncatingArraySuffix(s) {
+  const raw = String(s).trim();
+  const start = raw.indexOf('[');
+  if (start === -1) return null;
+  const sub = raw.slice(start);
+  let i = sub.length;
+  while (i > 40) {
+    const slice = sub.slice(0, i).trimEnd();
+    if (slice.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(slice);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        const arr = coerceTrendingArray(parsed);
+        if (arr && arr.length > 0) return arr;
+      } catch (_) {
+        /* continue */
+      }
+    }
+    if (i > 6000) i -= 6;
+    else if (i > 2000) i -= 2;
+    else i -= 1;
+  }
+  return null;
+}
+
+/**
+ * Append closing quotes / brackets for a truncated prefix (string-aware `{` `[` stack).
+ * Returns null if braces/brackets are already inconsistent (e.g. unescaped `"` in a value).
+ * @param {string} prefix
+ * @returns {string | null}
+ */
+function appendJsonClosersForTruncatedPrefix(prefix) {
+  let inString = false;
+  let escape = false;
+  /** @type {('obj' | 'arr')[]} */
+  const stack = [];
+
+  for (let i = 0; i < prefix.length; i++) {
+    const c = prefix[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (inString) {
+      if (c === '\\') escape = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      continue;
+    }
+    if (c === '{') {
+      stack.push('obj');
+      continue;
+    }
+    if (c === '[') {
+      stack.push('arr');
+      continue;
+    }
+    if (c === '}') {
+      if (stack.length === 0 || stack[stack.length - 1] !== 'obj') return null;
+      stack.pop();
+      continue;
+    }
+    if (c === ']') {
+      if (stack.length === 0 || stack[stack.length - 1] !== 'arr') return null;
+      stack.pop();
+      continue;
+    }
+  }
+
+  let p = prefix;
+  if (inString) {
+    while (p.endsWith('\\')) {
+      p = p.slice(0, -1);
+      if (!p.length) return null;
+    }
+    p += '"';
+  }
+
+  const closers = [];
+  for (let k = stack.length - 1; k >= 0; k -= 1) {
+    closers.push(stack[k] === 'obj' ? '}' : ']');
+  }
+  return p + closers.join('');
+}
+
+/**
+ * When Ollama hits `num_predict` mid-JSON, recover one or more complete topic objects by
+ * truncating from the end and appending structural closers (works when output does not end in `]`).
+ * @param {string} s
+ * @returns {unknown[] | null}
+ */
+function trySalvageTruncatedJsonArray(s) {
+  const raw = String(s).trim();
+  const start = raw.indexOf('[');
+  if (start === -1) return null;
+  const sub = raw.slice(start).replace(/\uFEFF/g, '');
+  const minLen = 32;
+  let i = sub.length;
+  while (i >= minLen) {
+    let chunk = sub.slice(0, i).trimEnd();
+    chunk = chunk.replace(/,\s*$/u, '');
+    if (/:\s*$/u.test(chunk)) chunk += 'null';
+    const cp = chunk.charCodeAt(chunk.length - 1);
+    if (cp >= 0xd800 && cp <= 0xdbff) chunk = chunk.slice(0, -1);
+
+    const closed = appendJsonClosersForTruncatedPrefix(chunk);
+    if (closed) {
+      try {
+        const parsed = JSON.parse(closed);
+        const arr = coerceTrendingArray(parsed);
+        if (arr && arr.length > 0) return arr;
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (_) {
+        /* try shorter prefix */
+      }
+    }
+    const nearTip = i > sub.length - 900;
+    i -= nearTip ? 1 : 5;
+  }
+  return null;
+}
+
+/**
+ * @param {unknown} o
+ * @returns {boolean}
+ */
+function looksLikeTopicRow(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return false;
+  const r = /** @type {Record<string, unknown>} */ (o);
+  return (
+    typeof r.hashtag === 'string' ||
+    typeof r.hindiName === 'string' ||
+    typeof r.category === 'string'
   );
+}
+
+/**
+ * @param {string} rawText
+ * @returns {unknown[]}
+ */
+function parseOllamaTrendingJson(rawText) {
+  const trimmed = String(rawText).trim();
+  const body = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  const seen = new Set();
+  /** @type {string[]} */
+  const attempts = [];
+  function add(s) {
+    if (!s || seen.has(s)) return;
+    seen.add(s);
+    attempts.push(s);
+  }
+  add(body);
+  const exBody = extractTopLevelJsonArray(body);
+  if (exBody) add(exBody);
+  const exTrim = extractTopLevelJsonArray(trimmed);
+  if (exTrim) add(exTrim);
+
+  add(sanitizeOllamaTrendJsonText(body));
+  if (exBody) add(sanitizeOllamaTrendJsonText(exBody));
+  if (exTrim) add(sanitizeOllamaTrendJsonText(exTrim));
+
+  let lastErr = null;
+  for (const candidate of attempts) {
+    try {
+      const parsed = JSON.parse(candidate);
+      const arr = coerceTrendingArray(parsed);
+      if (arr) return arr;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && looksLikeTopicRow(parsed)) {
+        return [parsed];
+      }
+      lastErr = new Error('Ollama JSON root was not an array (and no known wrapper key).');
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+
+  const salvaged =
+    tryParseByTruncatingArraySuffix(sanitizeOllamaTrendJsonText(body)) ||
+    tryParseByTruncatingArraySuffix(body) ||
+    tryParseByTruncatingArraySuffix(trimmed) ||
+    trySalvageTruncatedJsonArray(sanitizeOllamaTrendJsonText(body)) ||
+    trySalvageTruncatedJsonArray(body) ||
+    trySalvageTruncatedJsonArray(trimmed);
+  if (salvaged) {
+    console.warn('[api/trending] parseOllamaTrendingJson: used JSON salvage (truncated suffix and/or structural close)');
+    return salvaged;
+  }
+
+  const preview = trimmed.slice(0, 400).replace(/\s+/g, ' ');
+  const msg = lastErr && lastErr.message ? lastErr.message : 'parse failed';
+  throw new Error(
+    `Ollama returned non-JSON or wrong shape (${msg}). Preview: ${preview}${trimmed.length > 400 ? '…' : ''}`
+  );
+}
+
+/**
+ * @param {object} opts
+ * @param {string} opts.model
+ * @param {string} opts.url
+ * @param {string} opts.userText
+ * @param {number} opts.numCtx
+ * @param {number} opts.numPredict
+ * @param {boolean} opts.useFormatJson
+ * @param {AbortSignal} opts.signal
+ * @param {string} opts.passLabel
+ * @param {string} [opts.systemContent] — full system message (skips buildSystemPrompt + speed suffix when set)
+ */
+async function postOllamaChat(opts) {
+  const {
+    model,
+    url,
+    userText,
+    numCtx,
+    numPredict,
+    useFormatJson,
+    signal,
+    passLabel,
+    systemContent,
+  } = opts;
+  const systemMsg =
+    systemContent != null && String(systemContent).trim() !== ''
+      ? String(systemContent)
+      : buildSystemPrompt() + buildOllamaSpeedSuffix();
+  const chatBody = {
+    model,
+    messages: [
+      { role: 'system', content: systemMsg },
+      { role: 'user', content: userText },
+    ],
+    stream: false,
+    options: {
+      temperature: 0.12,
+      num_ctx: numCtx,
+      num_predict: numPredict,
+    },
+  };
+  if (useFormatJson) {
+    chatBody.format = 'json';
+  }
+
+  logOllamaDebugRequest(url, chatBody, passLabel);
 
   console.info('[api/trending] Ollama: starting POST /api/chat', {
+    pass: passLabel,
     url,
     model,
     timeoutMs: getOllamaFetchTimeoutMs(),
     userPayloadChars: userText.length,
+    num_ctx: numCtx,
     num_predict: numPredict,
+    format_json: useFormatJson,
   });
 
   let res;
@@ -851,23 +1592,12 @@ async function callOllama(userText, signal) {
       method: 'POST',
       signal,
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: buildSystemPrompt() + buildOllamaSpeedSuffix() },
-          { role: 'user', content: userText },
-        ],
-        stream: false,
-        options: {
-          temperature: 0.25,
-          num_predict: numPredict,
-        },
-      }),
+      body: JSON.stringify(chatBody),
     });
   } catch (e) {
     if (isAbortLikeError(e)) {
       throw new Error(
-        `Ollama request timed out after ${getOllamaFetchTimeoutMs()}ms (model=${model}). Raise OLLAMA_FETCH_TIMEOUT_MS (10000–${MAX_OLLAMA_FETCH_TIMEOUT_MS}, e.g. 600000), or shrink the prompt: OLLAMA_MAX_RSS_TERMS, OLLAMA_MAX_ARTICLES, and/or OLLAMA_NUM_PREDICT.`
+        `Ollama request timed out after ${getOllamaFetchTimeoutMs()}ms (model=${model}). Raise OLLAMA_FETCH_TIMEOUT_MS (10000–${MAX_OLLAMA_FETCH_TIMEOUT_MS}, e.g. 600000), or shrink the prompt: OLLAMA_MAX_RSS_TERMS, OLLAMA_MAX_ARTICLES, and/or OLLAMA_NUM_PREDICT. If the model stalls with no tokens, try OLLAMA_NUM_CTX=8192 (default in code) or lower.`
       );
     }
     throw new Error(
@@ -877,10 +1607,12 @@ async function callOllama(userText, signal) {
 
   if (!res.ok) {
     const t = await res.text();
+    logOllamaDebugErrorBody(passLabel, res.status, t);
     throw new Error(`Ollama API failed: ${res.status} ${t.slice(0, 400)}`);
   }
 
   const data = await res.json();
+  logOllamaDebugResponseJson(passLabel, data);
   const rawText =
     data &&
     data.message &&
@@ -896,22 +1628,242 @@ async function callOllama(userText, signal) {
     );
   }
 
-  let body = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-  const jsonMatch = body.match(/\[[\s\S]*\]/);
-  const jsonStr = jsonMatch ? jsonMatch[0] : body;
+  console.info('[api/trending] Ollama: response received', {
+    pass: passLabel,
+    contentChars: trimmed.length,
+    evalCount: data.eval_count,
+    promptEvalCount: data.prompt_eval_count,
+    totalDurationNs: data.total_duration,
+  });
 
-  let parsed;
+  const arr = parseOllamaTrendingJson(trimmed);
+  return { arr, data };
+}
+
+/**
+ * Local Ollama (OpenAI-compatible chat). Same JSON contract as Gemini.
+ * https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-chat-completion
+ */
+async function callOllama(userText, signal) {
+  assertOllamaHostReachableFromRuntime();
+  const base = (process.env.OLLAMA_HOST || 'http://127.0.0.1:11434').replace(/\/$/, '');
+  const model = process.env.OLLAMA_MODEL || 'llama3.1';
+  const url = `${base}/api/chat`;
+  const numCtx = getOllamaNumCtx();
+  const envPred = Number(process.env.OLLAMA_NUM_PREDICT);
+  const basePredict = Math.min(
+    8192,
+    Math.max(512, Number.isFinite(envPred) && envPred >= 512 ? envPred : 4200)
+  );
+  const k = topicTargetCount();
+  /** `format: json` often makes Llama stop at tiny valid JSON (~150 tokens). Opt in with OLLAMA_FORMAT_JSON=1. */
+  const wantFormatJson = (process.env.OLLAMA_FORMAT_JSON || '0').trim() === '1';
+
+  const run = (passLabel, useFormatJson, numPredict) =>
+    postOllamaChat({
+      model,
+      url,
+      userText,
+      numCtx,
+      numPredict,
+      useFormatJson,
+      signal,
+      passLabel,
+    });
+
+  let arr;
   try {
-    parsed = JSON.parse(jsonStr);
+    ({ arr } = await run('1', wantFormatJson, basePredict));
   } catch (e) {
-    throw new Error('Ollama returned non-JSON output; try a JSON-capable model or repeat the request.');
+    if (wantFormatJson) {
+      console.warn('[api/trending] Ollama pass 1 failed with format=json; retry without format:', e.message || e);
+      ({ arr } = await run('1b-no-format', false, basePredict));
+    } else {
+      throw e;
+    }
   }
 
-  if (!Array.isArray(parsed)) {
-    throw new Error('Ollama JSON was not an array');
+  if (arr.length < k) {
+    throw new Error(
+      `Ollama returned ${arr.length} topics after retries (need ${k}). Raise OLLAMA_NUM_PREDICT, set OLLAMA_NUM_CTX=8192 or higher, lower TRENDING_TOPIC_COUNT, or use a stronger model.`
+    );
   }
 
-  return parsed;
+  const filtered = filterLlmQualityTopicRows(arr);
+  if (filtered.length < k) {
+    throw new Error(
+      `Ollama returned only ${filtered.length}/${arr.length} topics passing quality filters (need ${k}). Model may be emitting placeholder titles, missing hindiName/hashtag, or heatScore < 20. Improve prompts/model or lower TRENDING_TOPIC_COUNT.`
+    );
+  }
+
+  return filtered;
+}
+
+function getPerArticleNumPredict() {
+  const n = parseInt(process.env.OLLAMA_PER_ARTICLE_NUM_PREDICT, 10);
+  if (Number.isFinite(n) && n >= 256 && n <= 8192) return n;
+  return 1600;
+}
+
+/** Shorten long URLs in LLM payloads so the model is less likely to truncate mid-string in JSON. */
+function truncateStringForLlm(s, max) {
+  const t = String(s || '').trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, Math.max(0, max - 1))}…`;
+}
+
+function buildSingleArticleSystemPrompt() {
+  const cats = TREND_CATEGORIES.join(', ');
+  return `You are a Hindi trending-topic writer for ShareChat (India). Output ONLY a JSON array containing exactly ONE object (the root value must be an array). Do not use markdown code fences.
+
+Required keys on that object: rank, hashtag, hindiName, description, aiSummary, category, heatScore, heatLabel, sources, imageUrl, relatedTags.
+
+The topic MUST be grounded in the single news article the user provides (RSS titles are optional context only). rank must be 1.
+
+"category" must be exactly one of: ${cats} — pick the best semantic fit for this article alone (e.g. exams/NEET → शिक्षा; RBI/markets → वित्त; cricket match → खेल).
+
+"heatLabel" must be exactly one of: बहुत गर्म, तेज़ी से बढ़ रहा, वायरल, उभरता हुआ.
+
+"heatScore" must be a JSON integer from 1 to 100 (no decimals, no fractions).
+
+Copy imageUrl from the article JSON when present (copy the exact string) else "". Every string value must use straight double quotes; escape internal " as \\". Keep relatedTags as a JSON array of 3–4 short hashtag strings.`;
+}
+
+/**
+ * @param {{ title?: string, source?: string, imageUrl?: string }} article
+ * @param {string[]} rssTitles
+ * @param {number} index 1-based
+ * @param {number} total
+ */
+function buildSingleArticleUserPayload(article, rssTitles, index, total) {
+  const slim = {
+    title: article.title || '',
+    source: article.source || '',
+    imageUrl: truncateStringForLlm(article.imageUrl || '', 220),
+  };
+  return [
+    `News article ${index}/${total} — produce exactly ONE trending card from THIS item:`,
+    JSON.stringify(slim, null, 0),
+    '',
+    'RSS headline context (same day; optional):',
+    JSON.stringify(rssTitles, null, 0),
+  ].join('\n');
+}
+
+function setSseCors(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Expose-Headers', 'X-LLM-Provider');
+}
+
+function beginOllamaArticleSse(res) {
+  setSseCors(res);
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('X-LLM-Provider', 'ollama');
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+}
+
+function sseWrite(res, payload) {
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+/**
+ * One Ollama /api/chat per news article; emits SSE `topics` after each completes.
+ * @param {import('http').ServerResponse} res
+ * @param {unknown} signals
+ * @param {unknown[]} articles
+ * @param {{ maxTerms?: number, maxArticles?: number }} payloadOpts
+ */
+async function streamOllamaPerArticle(res, signals, articles, payloadOpts) {
+  assertOllamaHostReachableFromRuntime();
+  beginOllamaArticleSse(res);
+  const signal = createOllamaAbortSignal();
+  const maxTerms = payloadOpts.maxTerms || 8;
+  const maxArt = payloadOpts.maxArticles || 5;
+  const terms = (signals.terms || []).slice(0, maxTerms);
+  const slice = dedupeNewsArticles(articles).slice(0, maxArt);
+
+  if (slice.length === 0) {
+    sseWrite(res, {
+      type: 'error',
+      detail:
+        'No news articles for per-article mode (NewsAPI returned none). Per-article streaming needs NEWSAPI_KEY and headlines.',
+    });
+    res.end();
+    return;
+  }
+
+  const base = (process.env.OLLAMA_HOST || 'http://127.0.0.1:11434').replace(/\/$/, '');
+  const model = process.env.OLLAMA_MODEL || 'llama3.1';
+  const url = `${base}/api/chat`;
+  const numCtx = getOllamaNumCtx();
+  const numPredArticle = getPerArticleNumPredict();
+  const systemContent =
+    buildSingleArticleSystemPrompt() +
+    '\n\nSpeed: Return ONLY valid JSON — one array, one object, first character [, last ]. No markdown, no text before or after.';
+
+  const rawAccum = [];
+
+  try {
+    sseWrite(res, {
+      type: 'meta',
+      mode: 'per_article',
+      articles: slice.length,
+      rssTerms: terms.length,
+      topicTarget: topicTargetCount(),
+    });
+
+    for (let i = 0; i < slice.length; i++) {
+      const article = /** @type {{ title?: string, source?: string, imageUrl?: string }} */ (slice[i]);
+      const userText = buildSingleArticleUserPayload(article, terms, i + 1, slice.length);
+      const passLabel = `stream-article-${i + 1}`;
+      const { arr } = await postOllamaChat({
+        model,
+        url,
+        userText,
+        numCtx,
+        numPredict: numPredArticle,
+        useFormatJson: false,
+        signal,
+        passLabel,
+        systemContent,
+      });
+      const row = Array.isArray(arr) && arr.length > 0 ? arr[0] : null;
+      if (!row || typeof row !== 'object') {
+        throw new Error(`Ollama returned no topic object for article ${i + 1}`);
+      }
+      rawAccum.push(row);
+      const topicsSoFar = sliceTopicsToLimit(normalizeTopics(rawAccum));
+      sseWrite(res, {
+        type: 'topics',
+        index: i,
+        articleTitle: article.title || '',
+        topics: topicsSoFar,
+      });
+    }
+
+    const topicsFinal = sliceTopicsToLimit(normalizeTopics(rawAccum));
+    sseWrite(res, { type: 'done', topics: topicsFinal });
+    res.end();
+  } catch (e) {
+    const msg = e && e.message ? e.message : String(e);
+    console.error('[api/trending] SSE per-article failed:', msg);
+    try {
+      sseWrite(res, { type: 'error', detail: msg });
+    } catch (_) {
+      /* ignore broken pipe */
+    }
+    try {
+      res.end();
+    } catch (_) {
+      /* ignore */
+    }
+  }
 }
 
 /**
@@ -941,11 +1893,9 @@ async function invokeLlm(useOllama, anthropicKey, geminiKey, userText) {
   throw new Error('No cloud LLM key (set ANTHROPIC_API_KEY and/or GEMINI_API_KEY)');
 }
 
-function normalizeTopics(raw) {
-  const k = topicTargetCount();
-  const targetOrder = TREND_CATEGORIES.slice(0, k);
-  const targetCatSet = new Set(targetOrder);
-  const allowedCategories = new Set(TREND_CATEGORIES);
+function normalizeTopics(raw, topicCountOverride) {
+  const k = topicCountOverride != null ? topicCountOverride : topicTargetCount();
+  const fullDeck = isFullCategoryDeckForK(k);
   const allowedHeatLabels = new Set([
     'बहुत गर्म',
     'तेज़ी से बढ़ रहा',
@@ -959,9 +1909,9 @@ function normalizeTopics(raw) {
         typeof item.rank === 'number' && !Number.isNaN(item.rank)
           ? item.rank
           : idx + 1;
-      const category = allowedCategories.has(String(item.category || '').trim())
-        ? String(item.category).trim()
-        : 'समाचार';
+      const rawCat = String(item.category ?? '')
+        .trim()
+        .normalize('NFC');
       const heatLabel = allowedHeatLabels.has(String(item.heatLabel || '').trim())
         ? String(item.heatLabel).trim()
         : 'वायरल';
@@ -971,11 +1921,14 @@ function normalizeTopics(raw) {
 
       return {
         rank,
+        rawCategory: rawCat,
         hashtag: String(item.hashtag || '').trim() || `#ट्रेंड${idx + 1}`,
-        hindiName: String(item.hindiName || '').trim() || 'अज्ञात विषय',
+        /** Never substitute "अज्ञात विषय" — empty names are filtered out below. */
+        hindiName: String(item.hindiName || '')
+          .trim()
+          .normalize('NFC'),
         description: String(item.description || '').trim(),
         aiSummary: String(item.aiSummary || '').trim(),
-        category,
         heatScore,
         heatLabel,
         sources: Array.isArray(item.sources)
@@ -987,21 +1940,84 @@ function normalizeTopics(raw) {
           : [],
       };
     })
+    .filter(passesNormalizedTrendQuality)
     .sort((a, b) => a.rank - b.rank);
 
-  const seen = new Set();
+  if (!fullDeck) {
+    const seenCat = new Set();
+    const out = [];
+    for (const row of mapped) {
+      if (out.length >= k) break;
+      let cat = resolveToCanonicalCategory(row.rawCategory);
+      const inferred = inferTrendCategoryFromText(row);
+      if (inferred) {
+        if (!cat) {
+          cat = inferred;
+        } else if (inferred !== cat && (cat === 'खेल' || cat === 'समाचार')) {
+          cat = inferred;
+        }
+      }
+      if (!cat) cat = inferred || 'समाचार';
+
+      while (seenCat.has(cat)) {
+        const alt = TREND_CATEGORIES.find((c) => !seenCat.has(c));
+        if (!alt) break;
+        cat = alt;
+      }
+      if (seenCat.has(cat)) continue;
+
+      seenCat.add(cat);
+      const resolvedModel = resolveToCanonicalCategory(row.rawCategory);
+      if (inferred && cat === inferred && resolvedModel !== inferred) {
+        console.info(
+          `[api/trending] normalizeTopics (partial): category set to "${cat}" for rank=${row.rank} (model had "${row.rawCategory || '(empty)'}")`
+        );
+      }
+      const { rawCategory: _drop, ...rest } = row;
+      out.push({ ...rest, category: cat });
+    }
+    return dedupeTrendTopicsPreservingOrder(
+      out.sort((a, b) => a.rank - b.rank).map((item, i) => ({ ...item, rank: i + 1 }))
+    );
+  }
+
+  const targetOrder = TREND_CATEGORIES;
+  const used = new Set();
   const deduped = [];
-  for (const item of mapped) {
-    if (!targetCatSet.has(item.category)) continue;
-    if (seen.has(item.category)) continue;
-    seen.add(item.category);
-    deduped.push(item);
+  for (const slot of targetOrder) {
     if (deduped.length >= k) break;
+    let pick = -1;
+    for (let i = 0; i < mapped.length; i++) {
+      if (used.has(i)) continue;
+      const resolved = resolveToCanonicalCategory(mapped[i].rawCategory);
+      if (resolved === slot) {
+        pick = i;
+        break;
+      }
+    }
+    if (pick === -1) {
+      for (let i = 0; i < mapped.length; i++) {
+        if (used.has(i)) continue;
+        pick = i;
+        break;
+      }
+    }
+    if (pick === -1) break;
+    used.add(pick);
+    const row = mapped[pick];
+    const resolved = resolveToCanonicalCategory(row.rawCategory);
+    if (resolved !== slot) {
+      console.warn(
+        `[api/trending] normalizeTopics: slot "${slot}" filled from LLM row rank=${row.rank}; model category was "${row.rawCategory || '(empty)'}" (resolved=${resolved || 'none'}) — label adjusted to match required categories for this run.`
+      );
+    }
+    const { rawCategory: _drop, ...rest } = row;
+    deduped.push({ ...rest, category: slot });
   }
 
   deduped.sort((a, b) => targetOrder.indexOf(a.category) - targetOrder.indexOf(b.category));
 
-  return deduped.map((item, i) => ({ ...item, rank: i + 1 }));
+  return dedupeTrendTopicsPreservingOrder(deduped.map((item, i) => ({ ...item, rank: i + 1 })));
 }
 
 export default async function handler(req, res) {
@@ -1046,7 +2062,7 @@ export default async function handler(req, res) {
     }
     res.statusCode = 200;
     res.setHeader('X-LLM-Provider', 'fallback');
-    res.end(JSON.stringify(FALLBACK_DATA));
+    res.end(JSON.stringify(sliceTopicsToLimit(FALLBACK_DATA)));
     return;
   }
 
@@ -1066,11 +2082,29 @@ export default async function handler(req, res) {
 
     const payloadOpts = useOllama
       ? {
-          maxTerms: Number(process.env.OLLAMA_MAX_RSS_TERMS) || 12,
-          maxArticles: Number(process.env.OLLAMA_MAX_ARTICLES) || 8,
+          maxTerms: Number(process.env.OLLAMA_MAX_RSS_TERMS) || 8,
+          maxArticles: Number(process.env.OLLAMA_MAX_ARTICLES) || 5,
           slimArticles: true,
         }
       : {};
+
+    const wantStream = parsedUrl.searchParams.get('stream') === '1';
+    if (wantStream) {
+      if (!useOllama) {
+        setCors(res);
+        res.statusCode = 400;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(
+          JSON.stringify({
+            error: 'Bad request',
+            detail: 'stream=1 (Server-Sent Events) only works with LLM_PROVIDER=ollama.',
+          })
+        );
+        return;
+      }
+      await streamOllamaPerArticle(res, signals, articles, payloadOpts);
+      return;
+    }
 
     const userText = buildTrendingUserPayload(signals, articles, payloadOpts);
 
@@ -1106,6 +2140,8 @@ export default async function handler(req, res) {
       providerHeader = 'fallback';
     }
 
+    topics = sliceTopicsToLimit(topics);
+
     res.statusCode = 200;
     res.setHeader('X-LLM-Provider', providerHeader);
     res.end(JSON.stringify(topics));
@@ -1129,7 +2165,7 @@ export default async function handler(req, res) {
                   : detail.includes('Ollama network error') || detail.includes('Ollama API failed')
                     ? 'Ollama: run `ollama serve` on the same machine as this API (or set OLLAMA_HOST to a reachable URL). Vercel/cloud cannot call Ollama on your laptop via 127.0.0.1 — use Gemini in prod or run `scripts/local-api.mjs` / dev-stack locally with LLM_PROVIDER=ollama.'
                     : detail.includes('Ollama request timed out')
-                      ? `Ollama exceeded OLLAMA_FETCH_TIMEOUT_MS (default ${DEFAULT_OLLAMA_FETCH_TIMEOUT_MS / 1000}s, max ${MAX_OLLAMA_FETCH_TIMEOUT_MS / 1000}s). Raise the env var, or lower OLLAMA_NUM_PREDICT / OLLAMA_MAX_RSS_TERMS / OLLAMA_MAX_ARTICLES so the model finishes sooner.`
+                      ? `Ollama exceeded OLLAMA_FETCH_TIMEOUT_MS (default ${DEFAULT_OLLAMA_FETCH_TIMEOUT_MS / 1000}s, max ${MAX_OLLAMA_FETCH_TIMEOUT_MS / 1000}s). Raise the env var, or lower OLLAMA_NUM_PREDICT / OLLAMA_MAX_RSS_TERMS / OLLAMA_MAX_ARTICLES / OLLAMA_NUM_CTX so the model finishes sooner.`
                       : detail.includes('fetch failed')
                         ? 'Low-level fetch failed — expand the error message for "cause:" (e.g. ECONNREFUSED = wrong host/port). Local Llama only works when the Node process can reach that OLLAMA_HOST.'
                         : detail.includes('aborted') || detail.includes('AbortError') || detail.includes('TimeoutError')

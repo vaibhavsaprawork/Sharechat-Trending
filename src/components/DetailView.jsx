@@ -1,12 +1,14 @@
 import {
   Bookmark,
   ChevronLeft,
+  Copy,
   Heart,
   MessageCircle,
+  MoreHorizontal,
   Play,
   Share2,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { parsePostId, useAppChrome } from '../context/AppChromeContext.jsx';
 import {
   CategoryIcon,
@@ -286,6 +288,8 @@ function SavedPanel({ topic, feed, t }) {
 export default function DetailView({ topic, onBack }) {
   const { t, locale } = useAppChrome();
   const [tab, setTab] = useState('posts');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuWrapRef = useRef(null);
   const heroSrc = resolveTopicImageUrl(topic);
   const feed = useTopicFeed(topic, locale);
   const pulse = useTrendPulse(topic, t);
@@ -293,12 +297,59 @@ export default function DetailView({ topic, onBack }) {
   const crossN =
     sourceList.length > 0 ? Math.min(12, Math.max(sourceList.length, 3)) : pulse.fallbackN;
 
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (e) => {
+      if (menuWrapRef.current && !menuWrapRef.current.contains(e.target)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [menuOpen]);
+
+  const shareTrend = async () => {
+    const title = String(topic.hindiName || topic.hashtag || '').trim();
+    const text = `${topic.hashtag}\n${String(topic.description || '').slice(0, 200)}`.trim();
+    const url = typeof window !== 'undefined' ? window.location.href : '';
+    setMenuOpen(false);
+    if (navigator.share) {
+      try {
+        await navigator.share({ title, text, url });
+      } catch {
+        /* dismissed */
+      }
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(`${title}\n${text}\n${url}`.trim());
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const copyHashtag = async () => {
+    const h = String(topic.hashtag || '').trim();
+    setMenuOpen(false);
+    if (!h) return;
+    try {
+      await navigator.clipboard.writeText(h);
+    } catch {
+      /* ignore */
+    }
+  };
+
   return (
     <div className={styles.root}>
       <div className={styles.topBar}>
         <div className={styles.backZone}>
-          <button type="button" className={styles.back} onClick={onBack} aria-label={t.back}>
-            <ChevronLeft size={20} strokeWidth={2.2} />
+          <button
+            type="button"
+            className={`navCircleBtn ${styles.back}`}
+            onClick={onBack}
+            aria-label={t.back}
+          >
+            <ChevronLeft size={22} strokeWidth={2.2} />
           </button>
         </div>
         <div className={styles.crumb}>
@@ -306,6 +357,30 @@ export default function DetailView({ topic, onBack }) {
             {t.back} <span className={styles.crumbSep}>›</span>{' '}
             <span className={styles.crumbTrailAccent}>{topic.category}</span>
           </div>
+        </div>
+        <div className={styles.navEnd} ref={menuWrapRef}>
+          <button
+            type="button"
+            className={`navCircleBtn ${styles.moreBtn}`}
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            aria-label={t.navMore}
+            onClick={() => setMenuOpen((o) => !o)}
+          >
+            <MoreHorizontal size={22} strokeWidth={2.1} />
+          </button>
+          {menuOpen ? (
+            <div className={styles.moreMenu} role="menu">
+              <button type="button" className={styles.moreMenuItem} role="menuitem" onClick={shareTrend}>
+                <Share2 size={18} strokeWidth={2} aria-hidden />
+                {t.share}
+              </button>
+              <button type="button" className={styles.moreMenuItem} role="menuitem" onClick={copyHashtag}>
+                <Copy size={18} strokeWidth={2} aria-hidden />
+                {t.copyHashtag}
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
 

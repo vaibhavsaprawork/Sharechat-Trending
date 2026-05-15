@@ -142,7 +142,8 @@ if (isDirectRun) {
     console.log(
     `[local-api] http://${host}:${port}  → Vite proxies /api here (.env.local loaded)\n` +
       `  Health: GET http://${host}:${port}/api/llm-health  (?all=1 | ?ollama=1 | ?gemini=1)\n` +
-      `  Ollama ping: GET http://${host}:${port}/api/ollama-test`
+      `  Ollama ping: GET http://${host}:${port}/api/ollama-test\n` +
+      `  SSE (Ollama, per-article): GET http://${host}:${port}/api/trending?stream=1  (set VITE_TRENDING_SSE=1 in Vite env)`
   );
   });
 }
